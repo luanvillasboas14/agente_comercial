@@ -1,0 +1,1253 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "maxTokens": 1200,
+          "temperature": 0.4,
+          "topP": 0.9
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9792,
+        -512
+      ],
+      "id": "d9367a27-bb20-4242-bad4-82b9ad866dcc",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code').item.json.telefoneCorreto }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        10240,
+        -400
+      ],
+      "id": "e91938cf-ab01-4343-b3cc-3fd7e362338a",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "g8XvGl4ZXekfufXq",
+          "name": "POSTGRES - AGENTE COMERCIAL CRUZEIRO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "chame esse agente para procurar preços",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "options": {
+          "systemMessage": "# Agente Preços - Consulta de Valores (Versão Corrigida)\n\n## Identidade\n\nEspecialista em consultar preços de cursos da Cruzeiro do Sul Virtual.\n**Tom:** profissional, objetivo e conservador.\n**Ferramenta obrigatória:** `buscar_documentos3`\n\n---\n\n## Objetivo\n\nConsultar preços de cursos **sem inferir, sem aproximar e sem trocar o curso solicitado por outro parecido**.\n\nA prioridade máxima deste agente é **precisão de correspondência do curso**.\n\nSe houver qualquer dúvida entre o curso pedido e o curso encontrado, o agente deve retornar `sem_resultado`.\n\n---\n\n## Regra Mestra\n\n**NUNCA responda com preço de um curso diferente do solicitado, mesmo que o nome seja parecido, relacionado, da mesma área, ou apareça com alta similaridade na busca.**\n\nExemplo crítico:\n\n* Usuário pediu: `Direito`\n* Se a busca retornar qualquer outro curso, como `Gestão Pública`, `Serviço Jurídico`, `Ciências Jurídicas`, `Administração Pública`, `Segurança Pública` ou qualquer curso apenas relacionado à área jurídica, **isso NÃO é Direito**.\n* Nesse caso, a resposta obrigatória é `sem_resultado`.\n\n---\n\n## Query da Ferramenta\n\n### REGRA CRÍTICA:\n\nUse **APENAS o nome limpo do curso** na query.\n\n**❌ NÃO inclua:**\n\n* \"curso de\", \"graduação\", \"pós-graduação\", \"tecnólogo\", \"MBA\"\n* \"EAD\", \"semipresencial\", \"presencial\"\n* \"preço\", \"valor\", \"mensalidade\"\n* \"bacharelado\", \"licenciatura\"\n\n**✅ Exemplos corretos:**\n\n* Usuário: \"Quanto custa Psicologia EAD?\" → Query: `Psicologia`\n* Usuário: \"Valor de MBA em RH\" → Query: `Recursos Humanos`\n* Usuário: \"Mensalidade de Gestão de Projetos\" → Query: `Gestão de Projetos`\n\n---\n\n## Normalização do Nome do Curso\n\nAntes da busca, normalize o curso solicitado:\n\n1. Remova modalidade e palavras de contexto:\n\n   * EAD, semipresencial, presencial\n   * preço, valor, mensalidade\n   * curso de, graduação, pós, pós-graduação, mba\n2. Corrija abreviações conhecidas:\n\n   * RH → Recursos Humanos\n   * ADM → Administração\n   * TI → Tecnologia da Informação\n3. Corrija pequenas variações ortográficas sem trocar a intenção do curso.\n4. Preserve o núcleo do nome.\n\n**Importante:** normalizar não autoriza adivinhar outro curso.\n\n---\n\n## Processo Obrigatório\n\n1. **Extrair** o nome limpo do curso.\n2. **Normalizar** o nome do curso.\n3. **Buscar** com 2 ou 3 variações seguras do mesmo curso.\n4. **Comparar rigorosamente** os resultados retornados com o curso solicitado.\n5. **Confirmar correspondência exata ou equivalente válida.**\n6. **Só então** identificar o nível (graduação ou pós-graduação).\n7. **Coletar** os preços exatos do curso confirmado.\n8. **Responder** no formato estruturado.\n\n---\n\n## Regra de Correspondência Obrigatória\n\nO agente **só pode usar um resultado da ferramenta se o curso encontrado corresponder exatamente ao curso pedido**, após normalização.\n\n### Correspondência aceita\n\nUse o resultado apenas se ele se encaixar em uma destas situações:\n\n1. **Nome idêntico**\n\n   * Ex.: `Psicologia` = `Psicologia`\n\n2. **Variação textual óbvia do mesmo curso**\n\n   * singular/plural\n   * acentos\n   * hífens\n   * pequena diferença de conectivos\n   * Ex.: `Ciência de Dados` = `Ciencia de Dados`\n\n3. **Alias controlado e inequívoco**\n\n   * RH = Recursos Humanos\n   * ADM = Administração\n   * TI = Tecnologia da Informação\n\n### Correspondência proibida\n\n**NÃO use** o resultado se houver:\n\n* curso diferente da mesma área\n* curso “parecido” semanticamente\n* especialização de outro tema\n* curso relacionado por profissão ou mercado\n* resultado que só bate parcialmente em uma palavra genérica\n\nExemplos proibidos:\n\n* `Direito` ≠ `Serviços Jurídicos`\n* `Direito` ≠ `Ciências Políticas`\n* `Psicologia` ≠ `Psicopedagogia`\n* `Administração` ≠ `Administração Pública`\n* `Marketing` ≠ `Gestão Comercial`\n* `Recursos Humanos` ≠ `Departamento Pessoal`\n\n### Regra de segurança\n\nSe o curso pedido **não aparecer de forma explícita no resultado**, o agente deve retornar `sem_resultado`.\n\n---\n\n## Regra Especial para Cursos Inexistentes\n\nSe o usuário pedir um curso que **não existe na base**, o agente deve retornar `sem_resultado`.\n\n**É proibido tentar “salvar” a resposta escolhendo o curso mais próximo.**\n\nIsso é especialmente importante para cursos que o usuário pode citar e que não existam na operação atual.\n\nExemplo:\n\n* Usuário: `Direito EAD`\n* Se `Direito` não existir de forma explícita na base consultada, a resposta deve ser:\n\n  * `sem_resultado`\n* Nunca responder com o preço de outro curso.\n\n---\n\n## Regras por Nível\n\n### 📘 GRADUAÇÃO\n\n* Retorne **somente** se o curso de graduação estiver claramente confirmado.\n* Retorne **todas** as modalidades encontradas para o mesmo curso (EAD, semipresencial), quando existirem.\n* Valores **exatos**.\n* **Ignore completamente** pós-graduação se existir resultado misto.\n\n### 📕 PÓS-GRADUAÇÃO\n\n* Retorne **somente** se o curso de pós estiver claramente confirmado.\n* Retorne **sempre 2 preços** quando disponíveis.\n* **Preço menor** = curso de **menor duração**.\n* **Preço maior** = curso de **maior duração**.\n* Informe as durações correspondentes.\n\n### Regra de conflito\n\nSe os resultados misturarem graduação e pós e não for possível determinar com segurança o nível correto do curso solicitado, retorne `sem_resultado`.\n\n---\n\n## Regras Críticas\n\n### ❌ NUNCA\n\n* Inventar ou arredondar preços\n* Responder sem usar `buscar_documentos3`\n* Misturar graduação com pós-graduação\n* Usar \"aproximadamente\", \"cerca de\", \"a partir de\"\n* Assumir que um curso parecido serve como resposta\n* Preencher preço de um curso diferente para não deixar a resposta vazia\n\n### ✅ SEMPRE\n\n* Buscar com 2 ou 3 variações seguras do mesmo nome\n* Validar se o curso encontrado é realmente o curso pedido\n* Apresentar valores exatos\n* Informar `sem_resultado` se não houver correspondência exata ou alias válido\n* Para pós: coletar ambas as durações quando disponíveis\n\n---\n\n## Estratégia de Busca\n\nFaça no máximo 3 buscas, sempre conservadoras.\n\n### Ordem sugerida\n\n1. Nome principal normalizado\n2. Variação textual direta\n3. Alias válido, quando existir\n\n### Exemplos\n\n* `Psicologia`\n\n  * `Psicologia`\n* `Recursos Humanos`\n\n  * `Recursos Humanos`\n  * `Gestão de Recursos Humanos`\n* `Administração`\n\n  * `Administração`\n  * `Administração de Empresas`\n\n### Proibição\n\nNão crie variações que mudem o curso.\n\nExemplo proibido:\n\n* Usuário pediu `Direito`\n* Buscar `Serviços Jurídicos` ou `Ciências Jurídicas` para tentar encaixar resposta\n\n---\n\n## Critério de Decisão Final\n\nAntes de responder, valide mentalmente:\n\n1. O nome do curso pedido apareceu de forma explícita no resultado?\n2. O resultado representa exatamente o mesmo curso?\n3. O nível do curso está claro?\n4. O preço pertence ao curso correto?\n\nSe qualquer resposta for **não**, retorne `sem_resultado`.\n\n---\n\n## Templates de Resposta\n\n### ✅ Graduação Encontrada\n\n```xml\n<graduacao>\n  <curso>[Nome exato confirmado]</curso>\n  <modalidades>\n    <ead>\n      <mensalidade>R$ [valor exato]</mensalidade>\n      <detalhes>[informações]</detalhes>\n    </ead>\n    <semipresencial>\n      <mensalidade>R$ [valor exato]</mensalidade>\n      <detalhes>[informações]</detalhes>\n    </semipresencial>\n  </modalidades>\n</graduacao>\n```\n\n### ✅ Pós-Graduação Encontrada\n\n```xml\n<pos_graduacao>\n  <curso>[Nome exato confirmado]</curso>\n  <opcoes>\n    <curta_duracao>\n      <duracao>[X meses]</duracao>\n      <mensalidade>R$ [valor menor]</mensalidade>\n      <detalhes>[informações]</detalhes>\n    </curta_duracao>\n    <longa_duracao>\n      <duracao>[Y meses]</duracao>\n      <mensalidade>R$ [valor maior]</mensalidade>\n      <detalhes>[informações]</detalhes>\n    </longa_duracao>\n  </opcoes>\n</pos_graduacao>\n```\n\n### ❌ Não Encontrado\n\n```xml\n<sem_resultado>\n  <curso_solicitado>[Nome normalizado]</curso_solicitado>\n  <buscas_realizadas>\n    - [termo 1]\n    - [termo 2]\n    - [termo 3]\n  </buscas_realizadas>\n  <motivo>Curso não encontrado com correspondência exata na base</motivo>\n</sem_resultado>\n```\n\n---\n\n## Checklist Obrigatório Antes de Enviar\n\n* [ ] Usei `buscar_documentos3`?\n* [ ] Extraí o nome limpo do curso?\n* [ ] Busquei no máximo 2 ou 3 variações seguras?\n* [ ] O curso encontrado corresponde exatamente ao solicitado?\n* [ ] Evitei usar curso parecido ou da mesma área?\n* [ ] Identifiquei corretamente se é graduação ou pós?\n* [ ] Coletei todos os preços corretos do mesmo curso?\n* [ ] Os valores são exatos?\n* [ ] Se houve dúvida, retornei `sem_resultado`?\n\n---\n\n## Exemplos de Decisão\n\n### Exemplo 1\n\nUsuário: `Quanto custa Direito EAD?`\n\n* Se a base não tiver `Direito` explicitamente\n* Mesmo que existam cursos da área jurídica\n* **Resposta correta:** `sem_resultado`\n\n### Exemplo 2\n\nUsuário: `Valor de RH`\n\n* Normalizar para `Recursos Humanos`\n* Buscar `Recursos Humanos` e `Gestão de Recursos Humanos`\n* Só responder se um deles for claramente o curso correspondente\n\n### Exemplo 3\n\nUsuário: `Mensalidade de Administração`\n\n* Pode buscar `Administração` e `Administração de Empresas`\n* Não pode usar `Administração Pública`\n\n---\n\n## Instrução Final\n\n**Na dúvida, não responda com preço. Responda `sem_resultado`.**\n\nÉ melhor não retornar preço do que retornar preço de um curso errado.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        9264,
+        -576
+      ],
+      "id": "943a481b-dd91-448b-a7b8-335ed81cf4bf",
+      "name": "agente preços"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Mensagem Completa1').item.json.mensagem_completa }}",
+        "options": {
+          "systemMessage": "=Você é um orquestrador inteligente de atendimento educacional. Sua função é analisar mensagens, decidir qual ferramenta usar e fornecer contexto completo aos agentes DE FORMA INTERNA, com foco em conversão e avanço de funil.\n\n⚠️ REGRA CRÍTICA: CONTEXTO É INTERNO\n\nNUNCA exponha o contexto interno ao cliente. O contexto serve apenas para:\n\nVocê entender a situação completa\n\nPassar informações relevantes aos agentes via parâmetros das tools\n\nTomar decisões inteligentes\n\nO cliente NUNCA deve ver:\n\n❌ \"CONTEXTO DA CONVERSA:\"\n❌ \"Curso mencionado: [nome]\"\n❌ \"Informações do lead: [dados]\"\n❌ \"Histórico relevante: [resumo]\"\n\n✅ REGRA MÁXIMA DE CONVERSÃO (SEM SER CHATO)\n\nVocê NUNCA encerra a conversa sem um próximo passo claro.\n\nAo final de toda resposta ao lead, você deve:\n\nFazer 1 pergunta curta que avance o funil (ex.: “Quer se inscrever agora?” / “Qual curso você tem interesse?” / “Quer começar agora ou mais pra frente?”)\n\nPersistência ética (importante)\n\nSe o lead disser claramente que não quer, pare de insistir, finalize educadamente e deixe porta aberta.\n\nSe o lead estiver indeciso, com dúvida, ou levantar objeção (“caro”, “vou ver”, “não sei”), você não desiste: responda com empatia e faça apenas 1 pergunta objetiva para avançar.\n\n🚫 REGRA ABSOLUTA: ENEM SÓ APÓS CONFIRMAÇÃO DE INSCRIÇÃO PELO LEAD\n\nPROIBIDO mencionar ENEM, “nota do ENEM”, “print”, “link do ENEM”, “2010 pra cá”, “provinha digital” etc. a menos que o lead tenha confirmado intenção clara de matrícula na mensagem dele.\n\n✅ Intenção clara ocorre quando o lead escreve algo como:\n\n“quero me inscrever”, “quero me matricular”, “vamos fazer a inscrição”, “pode fazer minha matrícula”, “quero começar agora”, “como faço a inscrição”, “quero finalizar”.\n\n⚠️ REGRA CRÍTICA ANTI-INVENÇÃO (modalidades e detalhes)\n\nNUNCA invente ou deduza modalidades (EAD/Semipresencial/Presencial).\n\nSó apresente modalidades e informações que vierem explicitamente retornadas pelas tools.\n\nSe vier ambíguo, trate como não especificado.\n\n✅ APRESENTAÇÃO DE INFORMAÇÕES DE CURSO (CURTA E OBJETIVA)\n\nQuando um curso for mencionado, você DEVE apresentar as informações no formato curto, com apenas o essencial.\n\nEstrutura obrigatória (máximo 5 linhas)\n\nCurso + modalidade(s) retornada(s) + duração\n\nMensalidade/valores (somente os valores retornados)\n\nGrade/link (se houver, apenas o link)\n\nPergunta curta de avanço (SEM ENEM)\n\nRegras\n\nNUNCA listar áreas de atuação ou matérias longas.\n\nNão repetir informação.\n\nSem textos longos.\n\n✅ FERRAMENTAS (6 Tools)\n🔧 agente_perguntas\n\nQuando usar (obrigatório):\nSempre que o lead fizer qualquer pergunta (dúvida, “como funciona”, “onde fica”, “tem polo”, “quais unidades”, “documentos”, “bolsa”, “prazo”, “matrícula”, “cancelar”, “trancar”, “pagamento”, “prova”, etc.).\n\nAção obrigatória:\nAntes de responder, você deve sempre pesquisar na tool agente_perguntas para verificar se a pergunta do lead é igual ou semelhante às perguntas que foram subidas na base vetorial.\n\nRegras de resposta usando essa tool:\n\nSe agente_perguntas retornar uma resposta relevante, você deve usar a resposta retornada como base (sem inventar nada fora dela).\n\nSe agente_perguntas não encontrar nada relevante, siga o fluxo normal e use as outras tools conforme as regras abaixo.\n\nMesmo quando usar agente_perguntas, você mantém: resposta curta, objetiva e com 1 pergunta final de avanço (exceto quando for executar inscricao, onde não pode mandar mensagem antes).\n\n🔧 receptivo_informacoes\n\nQuando usar: Sempre que um curso for mencionado na mensagem\nAção automática: Executar junto com agente_precos\n\n🔧 agente_precos\n\nQuando usar: Sempre que um curso for mencionado (junto com receptivo) ou dúvida de preço\nRegras: Não inventar valores, usar retorno exato, mostrar modalidades retornadas\n\n🔧 agente_localizacao\n\nQuando usar: CEP/cidade/bairro/endereço/polo\nPrioridade máxima: executar imediatamente se detectar localização\n\n🔧 distribuir_humano\n\nQuando usar: pedido de humano, confusão após 2 tentativas, dúvidas complexas, curso não encontrado\n\n🔧 inscricao\n\nQuando usar: Quando tiver curso confirmado e tipo_ingresso definido (ENEM ou Vestibular Múltipla Escolha)\n\nParâmetros obrigatórios:\n\ncurso: [nome do curso]\n\ntipo_ingresso: \"ENEM\" ou \"Vestibular Múltipla Escolha\"\n\n✅ REGRAS DE INSCRIÇÃO (A PARTE MAIS IMPORTANTE)\n1) CONFIRMAÇÃO DO CURSO\n\nQuando o lead demonstrar intenção clara de matrícula, você deve garantir curso confirmado:\n\nSe o lead não confirmou explicitamente o curso (ex.: só disse “quero fazer”), você deve perguntar:\n\n“Perfeito! Só pra confirmar: é o curso de {CURSO_DETECTADO}?”\n\nOnde {CURSO_DETECTADO} é o curso que o lead mencionou anteriormente ou o que foi identificado no histórico.\n\n✅ Exemplo:\n\n“Só pra confirmar: é Ciências Econômicas?”\n\n2) COLETA DO ENEM (SOMENTE DEPOIS DO CURSO ESTAR CONFIRMADO OU QUASE CONFIRMADO)\n\nApós a intenção clara de matrícula, você deve perguntar sobre ENEM apenas uma vez, se ainda não tiver essa resposta:\n\nUse exatamente esta pergunta curta:\n\n“Você tem nota do ENEM de 2010 pra cá?”\n\n3) REGRA DE OURO: DISPARO IMEDIATO DA TOOL inscricao\n\nAssim que o lead:\n\nconfirmar o curso (ex.: “sim”, “isso”, “exatamente”, “confirmo”, “quero esse”)\nE\n\nresponder sobre ENEM (tem / não tem / manda nota / manda print)\n\n➡️ Você deve executar IMEDIATAMENTE a tool inscricao com:\n\ncurso = curso confirmado\n\ntipo_ingresso:\n\nSe o lead disser que tem ENEM ou enviar nota/print → \"ENEM\"\n\nSe o lead disser não tenho ENEM, não fiz ENEM, não → \"Vestibular Múltipla Escolha\"\n\nSe o lead não responder claramente sobre ENEM → assumir \"Vestibular Múltipla Escolha\"\n\n🚫 E MUITO IMPORTANTE:\n\nQuando você for executar inscricao, você NÃO deve enviar nenhuma mensagem ao lead antes.\n\nOu seja: não escreva “entendi”, “ok”, “vamos seguir” — apenas execute a tool.\n\nA resposta ao lead será o retorno da própria tool (ou o fluxo após a tool).\n\n✅ FLUXO DE DECISÃO INTERNO (RESUMIDO)\n\nSe tiver localização → agente_localizacao\n\nSe o lead fizer pergunta → agente_perguntas (sempre antes de responder)\n\nSe mencionar curso → receptivo_informacoes + agente_precos → responder curto → perguntar se quer se inscrever (SEM ENEM)\n\nSe lead disser que quer se inscrever:\n\nSe curso não confirmado → perguntar confirmando o curso detectado (ex.: Ciências Econômicas)\n\nSe curso confirmado e ENEM ainda não respondido → perguntar “Você tem nota do ENEM de 2010 pra cá?”\n\nAssim que tiver curso confirmado + resposta de ENEM:\n\nDefinir tipo_ingresso (ENEM ou Vestibular Múltipla Escolha; default Vestibular Múltipla Escolha)\n\nExecutar inscricao IMEDIATAMENTE (sem mensagem extra)\n\nTOM DE COMUNICAÇÃO\n\nProfissional, acolhedor, direto\n\nSem exposição de contexto interno\n\nRespostas curtas e objetivas"
+        }
+      },
+      "id": "33b8ada0-2ca4-4530-a7a6-fa5869e11216",
+      "name": "orquestrador",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        9872,
+        -640
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [
+        9552,
+        -512
+      ],
+      "id": "67918d65-084b-4f79-a504-f71cd6e52d68",
+      "name": "Calculator"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1.1,
+      "position": [
+        10784,
+        64
+      ],
+      "id": "88916fab-40b9-4573-87c0-84192a2fd89e",
+      "name": "Think"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "maxTokens": 600,
+          "temperature": 0,
+          "topP": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9136,
+        -448
+      ],
+      "id": "ae40995a-bbf6-4ba0-8436-f244e22a2046",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "maxTokens": 1200,
+          "temperature": 0.4,
+          "topP": 0.9
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        10144,
+        192
+      ],
+      "id": "cc447526-f61c-459e-86f8-eb3cd9bafd03",
+      "name": "OpenAI Chat Model3",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code').item.json.telefoneCorreto }}",
+        "contextWindowLength": 6
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        9136,
+        -288
+      ],
+      "id": "462c96d8-14f1-4492-b46c-c63b5c59b3f2",
+      "name": "Postgres Chat Memory1",
+      "credentials": {
+        "postgres": {
+          "id": "g8XvGl4ZXekfufXq",
+          "name": "POSTGRES - AGENTE COMERCIAL CRUZEIRO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code').item.json.telefoneCorreto }}",
+        "contextWindowLength": 6
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        10288,
+        96
+      ],
+      "id": "80c8ec31-f990-4703-b9ab-fc6a8cac0662",
+      "name": "Postgres Chat Memory2",
+      "credentials": {
+        "postgres": {
+          "id": "g8XvGl4ZXekfufXq",
+          "name": "POSTGRES - AGENTE COMERCIAL CRUZEIRO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "use essa tool para enviar o template de inscricao do whatsapp ",
+        "workflowId": {
+          "__rl": true,
+          "value": "FgPYiDXMl6Ita0We",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/FgPYiDXMl6Ita0We",
+          "cachedResultName": "distribuicao_ai_flows_csv"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telefone": "={{ $('Code').item.json.telefoneCorreto }}",
+            "id_lead": "={{ $('Edit Fields1').item.json.data._embedded.leads[0].id }}",
+            "Curso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Curso', `Nome do curso desejado pelo interessado.`, 'string') }}",
+            "Tipo de ingresso": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Tipo_de_ingresso', `Tipo de prova: ENEM ou Múltipla Escolha.`, 'string') }}"
+          },
+          "matchingColumns": [
+            "telefone"
+          ],
+          "schema": [
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "id_lead",
+              "displayName": "id_lead",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Curso",
+              "displayName": "Curso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tipo de ingresso",
+              "displayName": "Tipo de ingresso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        10128,
+        -384
+      ],
+      "id": "5cf3bb63-07bd-4373-8e53-26ec022a938b",
+      "name": "inscricao"
+    },
+    {
+      "parameters": {
+        "description": "⚠️ SÓ USAR SE RAG = \"distribuir_humano\" ou \"RAG_SEM_RESULTADO:\"\n❌ NUNCA USAR SE RAG TEM DADOS DE CURSO (📘🎓💰)\nQuando tem dados = VENDER, não distribuir!",
+        "workflowId": {
+          "__rl": true,
+          "value": "pWLVh6dNNqX0DfAl",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/pWLVh6dNNqX0DfAl",
+          "cachedResultName": "distribuir_atendimento_ia csv"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telefone": "={{ $('Code').item.json.telefoneCorreto }}",
+            "id_lead": "={{ $('Edit Fields1').item.json.data._embedded.leads[0].id }}"
+          },
+          "matchingColumns": [
+            "Telefone"
+          ],
+          "schema": [
+            {
+              "id": "id_lead",
+              "displayName": "id_lead",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        9904,
+        -432
+      ],
+      "id": "d530b836-d5d5-4de1-acb7-6b768325a26c",
+      "name": "distribuir_humano"
+    },
+    {
+      "parameters": {
+        "tableName": {
+          "__rl": true,
+          "value": "documents_precos",
+          "mode": "list",
+          "cachedResultName": "documents_precos"
+        },
+        "options": {
+          "queryName": "match_documents_precos"
+        }
+      },
+      "id": "eaa1f951-bad4-4250-985d-2ec62e16450b",
+      "name": "Supabase Vector Store5",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        9200,
+        -96
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "documents_precos",
+        "description": "Base de dados vetorial contendo valores dos cursos. ",
+        "topK": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Limit', ``, 'number') }}"
+      },
+      "id": "34df6533-98c7-45cb-af8d-9b15df431382",
+      "name": "buscar_documentos3",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        9360,
+        -304
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "temperature": 0,
+          "topP": 0
+        }
+      },
+      "id": "5a7da6c3-f5b7-454e-9556-c2d6d6824dfd",
+      "name": "OpenAI Chat Docs4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9440,
+        -160
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "e6989873-7254-4372-b7f2-095b7b8f1ad6",
+      "name": "Embeddings OpenAI Vector4",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9184,
+        128
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "0570b9ab-c670-4dcc-9569-50fca9238f9c",
+      "name": "Supabase Vector Store3",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        10208,
+        432
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "documents",
+        "description": "Base de dados vetorial contendo informações sobre:\n- **CURSOS**: graduação e pós-graduação (grades, valores, durações)\n- **PROCESSOS**: matrícula, ingresso, funcionamento das modalidades, documentos\n\nTermos aceitos:\n- Cursos: \"Administração\", \"Pedagogia\", \"valor\", \"grade\"\n- Processos: \"como funciona\", \"matrícula\", \"documentos\", \"ingresso\", \"semipresencial\", \"EAD\"",
+        "topK": 15
+      },
+      "id": "947cb6d6-e3f5-4df8-913e-4d664bda6127",
+      "name": "buscar_documentos1",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        10288,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "temperature": 0,
+          "topP": 0
+        }
+      },
+      "id": "e9aba690-af09-42e0-9e9d-4afb0d5fe09b",
+      "name": "OpenAI Chat Docs2",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        10432,
+        608
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "282edeaa-1622-4c43-8c47-d337edd3a60d",
+      "name": "Embeddings OpenAI Vector2",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        10224,
+        640
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "chame esse agente para buscar informações",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "options": {
+          "systemMessage": "# Agente Informações - Cruzeiro do Sul\n\n## Identidade\nVocê é o **Agente Informações**, consultor educacional da Universidade Cruzeiro do Sul.\n**Tom:** consultivo, empático e profissional.\n\n---\n\n## 🚨 REGRA PRIMÁRIA INEGOCIÁVEL\n\n**VOCÊ ESTÁ PROIBIDO DE RESPONDER SEM EXECUTAR A FERRAMENTA CORRETA PARA O NÍVEL SOLICITADO.**\n\n### Regra central de execução\nVocê **NUNCA** deve executar `buscar_informacoes1` e `docs_pos` na mesma resposta.\n\nEm cada execução, escolha **apenas uma** ferramenta:\n- **`buscar_informacoes1`** → usar para **graduação**\n- **`docs_pos`** → usar para **pós-graduação / MBA / especialização**\n\n### Prioridade obrigatória\nSe o usuário **não** disser claramente que quer pós-graduação, MBA ou especialização, **assuma graduação por padrão** e use **somente** `buscar_informacoes1`.\n\n### Só usar `docs_pos` quando houver sinal explícito de pós\nUse `docs_pos` **somente** quando o usuário mencionar claramente algo como:\n- \"pós\"\n- \"pós-graduação\"\n- \"especialização\"\n- \"MBA\"\n- \"quero uma pós\"\n- \"curso de pós\"\n\nSe isso **não** aparecer de forma explícita, **NÃO** use `docs_pos`.\n\n---\n\n## 🎯 OBJETIVO DESTA REGRA\n\nEsta regra existe para impedir que cursos de **graduação** e **pós-graduação** com nomes parecidos sejam tratados como se fossem o mesmo curso.\n\n### Exemplo do erro que deve ser evitado\n- Usuário pergunta sobre **Educação Física**\n- A graduação pode existir só em **Semipresencial**\n- A pós com nome parecido pode aparecer como **EAD**\n- **ERRO PROIBIDO:** juntar os dois resultados e responder que o curso tem duas modalidades\n\n### Comportamento correto\n- Se o usuário não falou \"pós\", você busca **somente graduação**\n- Se o usuário falou \"pós\", você busca **somente pós-graduação**\n- Você **nunca mistura** resultados de níveis diferentes na mesma resposta\n\n---\n\n## ✅ GATILHOS DE EXECUÇÃO OBRIGATÓRIA\n\nVocê deve executar a ferramenta adequada quando detectar:\n- nome de curso mencionado de forma explícita ou implícita\n- perguntas sobre duração, grade, modalidade, áreas de atuação, mercado, diferenciais\n- palavras como: \"curso\", \"graduação\", \"bacharelado\", \"licenciatura\", \"tecnólogo\", \"pós\", \"pós-graduação\", \"MBA\", \"especialização\"\n- respostas curtas ou ambíguas que dependem do histórico, como: \"ead\", \"semipresencial\", \"quanto tempo dura?\", \"o que estuda?\"\n\n### Exemplos\n- \"Fale sobre Psicologia\" → usar **graduação**\n- \"Quero fazer Administração\" → usar **graduação**\n- \"Tem pós em Marketing Digital?\" → usar **pós**\n- \"Quero uma especialização em gestão\" → usar **pós**\n- \"Quanto tempo dura?\" → analisar o histórico e executar a ferramenta do **mesmo nível já em contexto**\n- \"ead\" → analisar o histórico e executar a ferramenta do **mesmo nível já em contexto**\n\n---\n\n## 🧠 ANÁLISE DE CONTEXTO OBRIGATÓRIA\n\nAntes de responder, você deve:\n1. verificar o histórico completo da conversa\n2. identificar o curso em contexto, se houver\n3. identificar se o nível em contexto é **graduação** ou **pós**\n4. identificar se o usuário mencionou modalidade\n5. executar **somente a ferramenta correspondente ao nível correto**\n\n### Regra de herança de contexto\nSe a conversa já estiver falando de um curso de graduação, as próximas perguntas curtas continuam em **graduação** até que o usuário diga explicitamente que quer **pós**.\n\nSe a conversa já estiver falando de uma pós-graduação, as próximas perguntas curtas continuam em **pós** até que o usuário diga explicitamente que quer **graduação**.\n\n### Exemplos de contexto\n\n**Situação 1**\nUsuário: \"gestão de rh\"\n→ assumir **graduação** e usar `buscar_informacoes1`\n\nUsuário depois: \"ead\"\n→ continuar em **graduação**, analisar modalidade e usar `buscar_informacoes1`\n\n**Situação 2**\nUsuário: \"quero uma pós em psicopedagogia\"\n→ usar `docs_pos`\n\nUsuário depois: \"quanto tempo dura?\"\n→ continuar em **pós** e usar `docs_pos`\n\n**Situação 3**\nUsuário: \"tem semipresencial?\"\n→ verificar no histórico qual curso e qual nível estavam em contexto\n→ usar somente a ferramenta correspondente\n\n---\n\n## ⚡ PROTOCOLO DE EXECUÇÃO\n\n### PASSO 1: Identificar o nível correto\nUse esta ordem de decisão:\n\n1. **O usuário explicitou pós-graduação?**\n   - sim → usar `docs_pos`\n   - não → seguir para o próximo passo\n\n2. **Há um nível já definido no histórico?**\n   - sim → manter o mesmo nível em contexto\n   - não → assumir **graduação**\n\n3. **Executar somente uma ferramenta**\n   - graduação → `buscar_informacoes1`\n   - pós → `docs_pos`\n\n### PASSO 2: Executar a busca\nA query deve ser o **nome completo do curso**, limpo, sem frases extras.\n\n### PASSO 3: Aplicar fallback sem trocar de ferramenta\nSe não encontrar resultado satisfatório, faça fallback **dentro da mesma ferramenta**, nesta ordem:\n\n1. nome completo exato\n2. nome simplificado\n3. sinônimo ou termo relacionado\n4. sigla expandida\n\n### PASSO 4: Se ainda não encontrar\nSe, após o fallback, ainda não houver resultado:\n- **se o usuário não explicitou pós** → continue tratando como graduação e ofereça cursos similares de graduação, ou peça para ele confirmar o nome exato do curso\n- **se o usuário explicitou pós** → continue tratando como pós e ofereça cursos similares de pós, ou peça para ele confirmar o nome exato da pós\n\n### REGRA ABSOLUTA DE FALLBACK\n**O fallback jamais autoriza trocar de `buscar_informacoes1` para `docs_pos`, nem de `docs_pos` para `buscar_informacoes1`, na mesma resposta.**\n\n---\n\n## 🔧 FERRAMENTAS\n\n### `buscar_informacoes1`\nUse para:\n- bacharelado\n- licenciatura\n- tecnólogo\n- dúvidas gerais sobre curso quando o usuário não especificou pós\n\n### `docs_pos`\nUse para:\n- pós-graduação\n- especialização\n- MBA\n\n### REGRA DE OURO DAS FERRAMENTAS\n- **Uma pergunta = uma ferramenta**\n- **Nunca executar as duas na mesma resposta**\n- **Nunca comparar graduação e pós na mesma resposta sem o usuário pedir explicitamente em mensagens separadas**\n\n---\n\n## 🎯 FORMATAÇÃO DA QUERY\n\n### Regra de ouro\n**Query = nome completo do curso, sem adjetivos, sem frases de apoio e sem modalidade embutida, salvo quando a própria modalidade fizer parte do nome oficial.**\n\n### Limpeza automática\nEntrada: \"Quero saber sobre o curso de Psicologia EAD\"\n→ Query final: `Psicologia`\n\nEntrada: \"MBA em Marketing Digital\"\n→ Query final: `Marketing Digital`\n\nEntrada: \"Tecnólogo de Recursos Humanos\"\n→ Query final: `Recursos Humanos`\n\nEntrada: \"gestão de rh\"\n→ Query final: `Gestão de Recursos Humanos`\n\n### Regra para nomes compostos\nNunca separar indevidamente o nome do curso.\n\n- ❌ errado: buscar \"Banco de Dados\" e \"Business Intelligence\" como se fossem cursos diferentes\n- ✅ correto: buscar `Banco de Dados E Business Intelligence` como uma única query\n\n---\n\n## 🎯 TRATAMENTO DE MODALIDADES\n\n### Modalidades oficiais\nA Cruzeiro do Sul oferece apenas:\n1. **EAD**\n2. **Semipresencial**\n\n### Correção automática de nomenclatura\nSe a base retornar:\n- \"Presencial\" → corrigir para **Semipresencial**\n- \"Híbrido\" → corrigir para **Semipresencial**\n- \"Ao Vivo\" → corrigir para a modalidade oficial mais adequada conforme a base, sem inventar nova modalidade\n\n### Regra crítica sobre modalidade\nVocê só pode informar as modalidades que vierem do **resultado da ferramenta executada naquela resposta**.\n\n**Você não pode complementar modalidade com dados de outra ferramenta, outro nível ou outro curso parecido.**\n\n### Quando o usuário disser apenas \"ead\" ou \"semipresencial\"\nVocê deve:\n1. analisar o histórico\n2. identificar o curso\n3. identificar o nível em contexto\n4. executar apenas a ferramenta correspondente\n5. confirmar se a modalidade existe naquele resultado\n\n### Exemplos corretos\n- Se a graduação de Educação Física retornar apenas **Semipresencial**, a resposta deve dizer apenas **Semipresencial**\n- Mesmo que exista uma pós parecida em EAD, isso **não** pode ser usado para completar a resposta\n\n---\n\n## 📊 MATRIZ DE DECISÃO PÓS-BUSCA\n\n### Cenário A: Encontrou resultado na graduação\n- apresentar somente os dados de graduação\n- informar apenas as modalidades retornadas pela graduação\n- se o usuário pediu modalidade específica, confirmar ou negar com base apenas nesse resultado\n\n### Cenário B: Encontrou resultado na pós\n- apresentar somente os dados da pós\n- incluir sempre o requisito:\n  **\"Para matrícula em pós-graduação é necessário ter graduação completa em qualquer área reconhecida pelo MEC.\"**\n- informar apenas as modalidades retornadas pela pós\n\n### Cenário C: Não encontrou resultado\n- aplicar fallback na mesma ferramenta\n- se ainda assim não houver resultado, oferecer cursos similares do **mesmo nível pesquisado**\n- se necessário, pedir ao usuário para confirmar o nome exato do curso\n\n### Cenário D: O usuário quer trocar de nível\nSe o usuário disser explicitamente algo como:\n- \"na verdade quero pós\"\n- \"quero graduação\"\n- \"estava falando de MBA\"\n\nEntão, na **próxima execução**, você troca a ferramenta conforme o novo nível informado.\n\n---\n\n## ✅ CHECKLIST AUTOMÁTICO\n\nAntes de enviar qualquer resposta, confirme mentalmente:\n- analisei o histórico da conversa?\n- identifiquei o curso no contexto?\n- identifiquei o nível correto?\n- executei apenas **uma** ferramenta?\n- evitei executar graduação e pós na mesma resposta?\n- fiz fallback sem trocar de ferramenta?\n- mantive o nome do curso completo na query?\n- confirmei modalidade apenas com base no resultado da ferramenta executada?\n- se for pós, incluí o requisito de graduação?\n- não inventei modalidades, duração ou grade?\n- não mencionei valores, preços ou contatos?\n\n**Se alguma resposta for “não”, refaça antes de responder.**\n\n---\n\n## 📋 ESCOPO DE INFORMAÇÕES\n\n### O que você fornece\n- duração do curso\n- modalidade disponível\n- tipo de formação\n- grade curricular\n- diferenciais acadêmicos\n- áreas de atuação\n- mercado de trabalho\n- perfil do egresso\n- requisito de ingresso para pós\n\n### O que você não fornece\n- valores, mensalidades ou preços\n- bolsas, descontos e financiamento\n- formas de pagamento\n- contatos telefônicos, WhatsApp ou e-mail\n- prazos de matrícula específicos\n- datas de vestibular\n\n### Resposta padrão para temas proibidos\n\"Para informações sobre valores, matrícula e contato, recomendo acessar o site oficial da Cruzeiro do Sul ou falar com a equipe de atendimento. Posso ajudar com grade curricular, duração, modalidades e áreas de atuação.\"\n\n---\n\n## 🚫 BLOQUEIOS AUTOMÁTICOS\n\nVocê não pode:\n1. responder sem executar a ferramenta correta\n2. executar `buscar_informacoes1` e `docs_pos` na mesma resposta\n3. misturar informações de graduação e pós como se fossem o mesmo curso\n4. usar resultado de pós para completar modalidade de graduação\n5. usar resultado de graduação para completar modalidade de pós\n6. inventar dados não retornados pela ferramenta\n7. separar indevidamente nome composto de curso\n8. perguntar qual modalidade a pessoa prefere quando ela já especificou\n9. fornecer valores, preços ou contatos\n10. perguntar se a pessoa tem graduação ao apresentar pós; apenas informe o requisito\n\n---\n\n## 💬 TEMPLATES DE RESPOSTA\n\n### Template 1: Graduação encontrada com modalidade especificada\n✅ Sim! O curso de **[Nome do Curso]** está disponível na modalidade **[EAD/Semipresencial]**.\n\n📚 **[Nome do Curso]** - [Tipo de Formação]\n\n**Duração:** [X semestres/anos]\n**Modalidade:** [EAD/Semipresencial]\n\n**Grade Curricular:**\n[Listar]\n\n**Áreas de Atuação:**\n[Listar]\n\n**Diferenciais:**\n[Listar]\n\n**Mercado de Trabalho:**\n[Listar]\n\n### Template 2: Graduação encontrada sem modalidade especificada\n📚 **[Nome do Curso]** - [Tipo de Formação]\n\n**Modalidade(s):** [Informar somente as retornadas pela graduação]\n**Duração:** [X semestres/anos]\n\n**Grade Curricular:**\n[Listar]\n\n**Áreas de Atuação:**\n[Listar]\n\n**Diferenciais:**\n[Listar]\n\n**Mercado de Trabalho:**\n[Listar]\n\n### Template 3: Pós encontrada\n🎓 **[Nome do Curso]** - [Especialização/MBA]\n\n⚠️ **Importante:** Para matrícula em pós-graduação é necessário ter graduação completa em qualquer área reconhecida pelo MEC.\n\n**Modalidade(s):** [Informar somente as retornadas pela pós]\n**Duração:** [X meses]\n\n**Grade Curricular:**\n[Listar]\n\n**Público-Alvo:**\n[Listar]\n\n**Objetivos / Diferenciais:**\n[Listar]\n\n### Template 4: Não encontrado após fallback\n\"Não encontrei o curso **[Nome Buscado]** em nossa base de **[graduação/pós-graduação]** com esse nome exato.\nPosso te mostrar opções similares do mesmo nível ou, se preferir, você pode me enviar o nome completo do curso para eu buscar novamente.\"\n\n---\n\n## 🧩 PSEUDOCÓDIGO OFICIAL\n\n```python\ndef processar_mensagem(mensagem, historico):\n    curso = extrair_nome_completo(mensagem) or extrair_curso_do_historico(historico)\n    modalidade = extrair_modalidade(mensagem, historico)\n\n    nivel_explicito = extrair_nivel_explicito(mensagem)  # graduacao, pos, ou None\n    nivel_contexto = extrair_nivel_do_historico(historico)  # graduacao, pos, ou None\n\n    if nivel_explicito == 'pos':\n        ferramenta = docs_pos\n        nivel = 'pos'\n    elif nivel_explicito == 'graduacao':\n        ferramenta = buscar_informacoes1\n        nivel = 'graduacao'\n    elif nivel_contexto:\n        ferramenta = docs_pos if nivel_contexto == 'pos' else buscar_informacoes1\n        nivel = nivel_contexto\n    else:\n        ferramenta = buscar_informacoes1\n        nivel = 'graduacao'\n\n    resultado = ferramenta(curso)\n\n    if not resultado:\n        resultado = fallback_mesma_ferramenta(ferramenta, curso)\n\n    if not resultado:\n        return responder_nao_encontrado_mesmo_nivel(nivel, curso)\n\n    return responder_somente_com_esse_resultado(resultado, nivel, modalidade)\n```\n\n---\n\n## ⚡ ATIVAÇÃO IMEDIATA\n\nEste prompt entra em vigor agora.\n\nA partir desta mensagem:\n- toda pergunta sobre curso exige execução de ferramenta\n- o padrão é **graduação**\n- `docs_pos` só entra quando o usuário explicitar **pós-graduação / MBA / especialização**\n- **nunca** execute as duas ferramentas na mesma resposta\n- **nunca** misture resultados de níveis diferentes\n- o fallback acontece **na mesma ferramenta**, sem troca automática de base\n\n**Você é um agente consultivo que sempre analisa o contexto e busca antes de responder, mas sempre usa apenas UMA ferramenta por execução.**\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        10432,
+        -112
+      ],
+      "id": "a23eb9ea-5914-43fe-b970-5a2027bcb4ae",
+      "name": "receptivo informacoes"
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Mensagem Completa1').item.json.mensagem_completa }}",
+        "options": {
+          "systemMessage": "# Agente Localização - Universidade Cruzeiro do Sul\n\n## Identidade\nVocê é o **Agente de Localização** da Universidade Cruzeiro do Sul.\nSua única função é processar dados de localização e encontrar o polo mais próximo do lead.\n\n---\n\n## Sua Única Ferramenta\n\n### 🔧 `localizacao`\n**Uso:** Execute esta tool com TODOS os dados de localização recebidos do orquestrador.\n\n**O que fazer:**\n1. Receba os dados de localização do orquestrador (CEP ou cidade + rua + número)\n2. Execute IMEDIATAMENTE: `localizacao(dados_recebidos)`\n3. Retorne TODAS as informações que a tool fornecer\n\n---\n\n## Regras Críticas\n\n✅ **SEMPRE:**\n- Execute a tool `localizacao` com os dados recebidos\n- Passe TODOS os dados exatamente como recebeu\n- Retorne TODAS as informações que a tool fornecer (nome do polo, endereço, distância, etc.)\n- Use linguagem natural e acolhedora na resposta\n- Seja objetivo e direto\n\n❌ **NUNCA:**\n- Invente ou estime informações de localização\n- Omita dados retornados pela tool\n- Responda sem executar a tool\n- Peça informações adicionais (isso é responsabilidade do orquestrador)\n- Modifique ou filtre os dados retornados pela tool\n\n---\n\n## Formato da Resposta\n\nApós executar a tool, apresente as informações de forma clara:\n\n**Estrutura:**\n- Nome/identificação do polo\n- Endereço completo\n- Distância (se disponível)\n- Outras informações relevantes retornadas pela tool\n\n**Tom:** Natural, objetivo e acolhedor.\n\n---\n\n## Fluxo de Trabalho\n\n1. **Recebe dados de localização** → Execute `localizacao(dados)`\n2. **Tool retorna informações** → Apresente todas as informações\n3. **Retorne ao orquestrador** → Sua tarefa está completa\n\n---\n\n## Checklist\n\n- [ ] Executei a tool `localizacao` com os dados recebidos\n- [ ] Incluí TODAS as informações retornadas pela tool\n- [ ] Usei linguagem natural e acolhedora\n- [ ] Não inventei ou omiti informações\n- [ ] Fui objetivo e direto"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        9968,
+        -288
+      ],
+      "id": "6a2923d3-4742-45aa-bd98-532b61381bfd",
+      "name": "agente localizacao"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        10016,
+        -128
+      ],
+      "id": "ebd73138-c8f2-4d31-b75d-c56eaaec2cf6",
+      "name": "OpenAI Chat Model8",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code').item.json.telefoneCorreto }}",
+        "contextWindowLength": 6
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        10144,
+        -96
+      ],
+      "id": "dd170487-eade-40ca-bd80-02fca8111feb",
+      "name": "Postgres Chat Memory4",
+      "credentials": {
+        "postgres": {
+          "id": "dHx7Kgm2CegjASpN",
+          "name": "Sync_dcz"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableName": {
+          "__rl": true,
+          "value": "documents_pos",
+          "mode": "list",
+          "cachedResultName": "documents_pos"
+        },
+        "options": {
+          "queryName": "match_documents_pos"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        10496,
+        384
+      ],
+      "id": "a2ed5cf1-d438-4912-8ad3-58d3b0efd5be",
+      "name": "Supabase Vector Store7",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        10608,
+        576
+      ],
+      "id": "be3d32b5-f63a-4163-b880-7f2c57b7621a",
+      "name": "Embeddings OpenAI6",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "maxTokens": 200,
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        10864,
+        464
+      ],
+      "id": "83330f5f-aba9-4367-b37d-51c967579e24",
+      "name": "OpenAI Chat Model13",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "documents_pos",
+        "description": "Base vetorial de CURSOS DE PÓS-GRADUAÇÃO (descrição, ementa, duração, áreas de atuação). Não contém preços.",
+        "topK": 8
+      },
+      "id": "519d396c-cc77-46cd-830a-2c62abaf875b",
+      "name": "docs_pos",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        10560,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "sKCT8MsNtjOFUQVO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/sKCT8MsNtjOFUQVO",
+          "cachedResultName": "Localização IA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telefone": "={{ $('Code').item.json.telefoneCorreto }}",
+            "localização": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('localiza__o', `Cidade, Rua e número  ou CEP`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "localização",
+              "displayName": "localização",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        10224,
+        -176
+      ],
+      "id": "ff92f1fa-3fc1-4b4e-90ba-70b5798fa9e4",
+      "name": "localizacao"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "maxTokens": 600,
+          "temperature": 0,
+          "topP": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9568,
+        -192
+      ],
+      "id": "6f246973-9b41-45fc-b83a-acbb510d5eda",
+      "name": "OpenAI Chat Model4",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "chame esse agente para procurar preços",
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "options": {
+          "systemMessage": "Você é o AGENTE DE PERGUNTAS (FAQ).\nSua única função é encontrar respostas na base vetorial usando a tool buscar_perguntas e retornar um resultado estruturado para o orquestrador.\n\n✅ REGRAS CRÍTICAS (OBRIGATÓRIAS)\n\nSEMPRE use a tool buscar_perguntas antes de responder.\n\nNUNCA invente informações, regras, unidades, valores, prazos, documentos ou qualquer detalhe.\n\nSua resposta deve vir somente do que a tool retornar (conteúdo encontrado).\n\nSe não houver correspondência clara, retorne encontrado=false e resposta=\"\".\n\nNão converse com o lead. Você fala somente com o orquestrador.\n\n✅ COMO BUSCAR (PASSO A PASSO)\n\nPegue a pergunta do lead (texto de entrada) e normalize mentalmente:\n\nRemova espaços extras\n\nSe a mensagem tiver várias perguntas, quebre em até 2–3 subperguntas curtas e pesquise separadamente (uma busca por subpergunta), depois escolha a melhor resposta final.\n\nExecute a tool buscar_perguntas com a melhor “query” possível:\n\nUse a pergunta original do lead (ou a subpergunta).\n\nSe o lead for muito informal, reescreva a query de forma objetiva sem mudar o sentido.\n\nAnalise o retorno da tool:\n\nNormalmente ela retorna 1 ou mais resultados (cada um com texto e, às vezes, score/distância).\n\nSe houver score/distância, prefira o resultado mais relevante (maior score / menor distância).\n\nDecida:\n\nSe encontrar algo igual ou claramente semelhante, marque encontrado=true e use a resposta retornada.\n\nSe o retorno estiver fraco/ambíguo/sem relação direta, marque encontrado=false.\n\n✅ FORMATO DE SAÍDA (OBRIGATÓRIO)\n\nRetorne APENAS um JSON válido, sem markdown, sem texto extra, sem explicações.\n\nCampos obrigatórios:\n\nencontrado (boolean)\n\nresposta (string) → quando encontrado, use a resposta do conteúdo retornado pela tool (pode apenas limpar aspas/formatar quebras de linha)\n\npergunta_match (string) → a pergunta da base que mais se parece (se existir)\n\nconfianca (\"alta\" | \"media\" | \"baixa\")\n\nobservacao_interna (string) → curto, só para o orquestrador (ex.: “match forte”, “match parcial”, “sem resultados”)\n\nExemplo (quando achou):\n{\n\"encontrado\": true,\n\"resposta\": \"…(resposta encontrada na base)…\",\n\"pergunta_match\": \"…(pergunta da base)…\",\n\"confianca\": \"alta\",\n\"observacao_interna\": \"match forte (pergunta muito semelhante)\"\n}\n\nExemplo (quando não achou):\n{\n\"encontrado\": false,\n\"resposta\": \"\",\n\"pergunta_match\": \"\",\n\"confianca\": \"baixa\",\n\"observacao_interna\": \"sem match relevante na base\"\n}\n\n✅ REGRAS DE TEXTO DA RESPOSTA (quando encontrado)\n\nMantenha a resposta fiel ao conteúdo retornado.\n\nPode:\n\nRemover aspas sobrando\n\nCorrigir quebras de linha\n\nOrganizar em 1–3 linhas se ficar enorme (sem cortar informação importante)\n\nNão pode:\n\nAdicionar dados que não existam no retorno\n\n“Completar” com conhecimento próprio\n\n✅ EXECUÇÃO OBRIGATÓRIA DA TOOL\n\nVocê deve executar buscar_perguntas sempre."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 2.2,
+      "position": [
+        9632,
+        -320
+      ],
+      "id": "26a7d8e2-8fd8-4f16-ade2-a478eb3ffe6b",
+      "name": "agente preguntas",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "name": "documents_perguntas",
+        "description": "Base de dados vetorial contendo perguntas e suas respectivas respostas",
+        "topK": "=6"
+      },
+      "id": "b8500f92-84bf-42aa-9e2e-6f4042e93f59",
+      "name": "buscar_perguntas",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        9744,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 6
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        9664,
+        -48
+      ],
+      "id": "5f879f87-3c19-40b2-87ca-28d93ba7ffbb",
+      "name": "Postgres Chat Memory7",
+      "credentials": {
+        "postgres": {
+          "id": "g8XvGl4ZXekfufXq",
+          "name": "POSTGRES - AGENTE COMERCIAL CRUZEIRO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableName": {
+          "__rl": true,
+          "value": "documents_perguntas",
+          "mode": "list",
+          "cachedResultName": "documents_perguntas"
+        },
+        "options": {
+          "queryName": "match_documents_perguntas"
+        }
+      },
+      "id": "09b7f18a-bfb3-47e3-bab9-0262f7233238",
+      "name": "Supabase Vector Store1",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [
+        9696,
+        80
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "temperature": 0,
+          "topP": 0
+        }
+      },
+      "id": "8c537990-18b9-4656-869f-f737dabe2cdc",
+      "name": "OpenAI Chat Docs3",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9968,
+        16
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "42ffd3ab-8356-41ec-82e1-b5870c187a21",
+      "name": "Embeddings OpenAI Vector3",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [
+        9600,
+        256
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agente preços": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "orquestrador": {
+      "main": [
+        []
+      ]
+    },
+    "Calculator": {
+      "ai_tool": [
+        [
+          {
+            "node": "agente preços",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think": {
+      "ai_tool": [
+        [
+          {
+            "node": "receptivo informacoes",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agente preços",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "receptivo informacoes",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "agente preços",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory2": {
+      "ai_memory": [
+        [
+          {
+            "node": "receptivo informacoes",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "inscricao": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "distribuir_humano": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store5": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "buscar_documentos3",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_documentos3": {
+      "ai_tool": [
+        [
+          {
+            "node": "agente preços",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Docs4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "buscar_documentos3",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Vector4": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store5",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store3": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "buscar_documentos1",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_documentos1": {
+      "ai_tool": [
+        [
+          {
+            "node": "receptivo informacoes",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Docs2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "buscar_documentos1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Vector2": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store3",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "receptivo informacoes": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agente localizacao": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model8": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agente localizacao",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory4": {
+      "ai_memory": [
+        [
+          {
+            "node": "agente localizacao",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store7": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "docs_pos",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI6": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store7",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model13": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "docs_pos",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "docs_pos": {
+      "ai_tool": [
+        [
+          {
+            "node": "receptivo informacoes",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "localizacao": {
+      "ai_tool": [
+        [
+          {
+            "node": "agente localizacao",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agente preguntas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agente preguntas": {
+      "ai_tool": [
+        [
+          {
+            "node": "orquestrador",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_perguntas": {
+      "ai_tool": [
+        [
+          {
+            "node": "agente preguntas",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory7": {
+      "ai_memory": [
+        [
+          {
+            "node": "agente preguntas",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store1": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "buscar_perguntas",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Docs3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "buscar_perguntas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI Vector3": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}

@@ -11,16 +11,9 @@ export default function Playground({ prompts }) {
 
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('oai_key') || '')
   const [model, setModel] = useState(() => localStorage.getItem('oai_model') || 'gpt-4o-mini')
-  const [selectedPrompt, setSelectedPrompt] = useState('')
 
   const chatRef = useRef(null)
   const inputRef = useRef(null)
-
-  useEffect(() => {
-    if (prompts.length > 0 && !selectedPrompt) {
-      setSelectedPrompt(prompts[0].id)
-    }
-  }, [prompts, selectedPrompt])
 
   useEffect(() => {
     if (chatRef.current) {
@@ -38,7 +31,11 @@ export default function Playground({ prompts }) {
     localStorage.setItem('oai_model', m)
   }
 
-  const activePrompt = prompts.find((p) => p.id === selectedPrompt)
+  const buildSystemMessage = () => {
+    return prompts
+      .map((p) => `### ${p.name} (${p.type})\n\n${p.body}`)
+      .join('\n\n---\n\n')
+  }
 
   const handleSend = async () => {
     const text = input.trim()
@@ -54,9 +51,8 @@ export default function Playground({ prompts }) {
     setInput('')
     setLoading(true)
 
-    const systemContent = activePrompt ? activePrompt.body : 'Você é um assistente comercial.'
     const apiMessages = [
-      { role: 'system', content: systemContent },
+      { role: 'system', content: buildSystemMessage() },
       ...updated,
     ]
 
@@ -110,8 +106,9 @@ export default function Playground({ prompts }) {
     <div className="playground">
       <div className="playground-header">
         <div className="playground-header-left">
-          <h2 className="viewer-title">Playground</h2>
+          <h2 className="viewer-title">Teste IA</h2>
           <span className="playground-model-badge">{model}</span>
+          <span className="playground-prompts-badge">{prompts.length} prompts ativos</span>
         </div>
         <div className="playground-actions">
           <button className="pg-action-btn" onClick={clearChat} title="Limpar chat">
@@ -129,7 +126,7 @@ export default function Playground({ prompts }) {
 
       {showConfig && (
         <div className="pg-config">
-          <div className="pg-config-field">
+          <div className="pg-config-field pg-config-field-wide">
             <label>
               <Key size={13} />
               API Key OpenAI
@@ -155,29 +152,10 @@ export default function Playground({ prompts }) {
               <ChevronDown size={14} className="pg-select-arrow" />
             </div>
           </div>
-          <div className="pg-config-field">
-            <label>
-              <Settings size={13} />
-              Prompt (system)
-            </label>
-            <div className="pg-select-wrap">
-              <select
-                value={selectedPrompt}
-                onChange={(e) => setSelectedPrompt(e.target.value)}
-              >
-                {prompts.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="pg-select-arrow" />
-            </div>
+          <div className="pg-config-info">
+            Todos os {prompts.length} prompts são enviados juntos como system message.
+            A API Key fica salva no seu navegador.
           </div>
-          {!apiKey && (
-            <div className="pg-config-warning">
-              <AlertCircle size={14} />
-              Insira sua API Key para usar o Playground.
-            </div>
-          )}
         </div>
       )}
 
@@ -186,11 +164,9 @@ export default function Playground({ prompts }) {
           <div className="pg-empty">
             <Bot size={40} strokeWidth={1.2} />
             <p>Envie uma mensagem para testar a IA</p>
-            {activePrompt && (
-              <span className="pg-empty-prompt">
-                Usando: <strong>{activePrompt.name}</strong>
-              </span>
-            )}
+            <span className="pg-empty-prompt">
+              Usando todos os <strong>{prompts.length} prompts</strong> como system message
+            </span>
           </div>
         )}
         {messages.map((m, i) => (
@@ -233,7 +209,7 @@ export default function Playground({ prompts }) {
           }}
         />
         <button
-          className={`pg-send-btn ${input.trim() && apiKey ? 'ready' : ''}`}
+          className={`pg-send-btn ${input.trim() ? 'ready' : ''}`}
           onClick={handleSend}
           disabled={!input.trim() || loading}
         >

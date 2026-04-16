@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import PromptViewer from './components/PromptViewer'
 import Playground from './components/Playground'
 import './App.css'
+
+const STORAGE_KEY = 'prompt_edits'
+const VERSIONS_KEY = 'prompt_versions'
+const DAY_MS = 24 * 60 * 60 * 1000
 
 function extractPrompts(data) {
   const nodes = data.nodes || []
@@ -52,8 +56,29 @@ function extractPrompts(data) {
   return prompts
 }
 
+function loadEdits() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}
+  } catch { return {} }
+}
+
+function loadVersions() {
+  try {
+    const v = JSON.parse(localStorage.getItem(VERSIONS_KEY)) || {}
+    const now = Date.now()
+    for (const id in v) {
+      v[id] = v[id].filter((entry) => now - entry.ts < DAY_MS)
+      if (v[id].length === 0) delete v[id]
+    }
+    localStorage.setItem(VERSIONS_KEY, JSON.stringify(v))
+    return v
+  } catch { return {} }
+}
+
 export default function App() {
-  const [prompts, setPrompts] = useState([])
+  const [originalPrompts, setOriginalPrompts] = useState([])
+  const [edits, setEdits] = useState(loadEdits)
+  const [versions, setVersions] = useState(loadVersions)
   const [page, setPage] = useState('prompts')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -66,7 +91,7 @@ export default function App() {
       })
       .then((txt) => {
         const data = JSON.parse(txt)
-        setPrompts(extractPrompts(data))
+        setOriginalPrompts(extractPrompts(data))
         setLoading(false)
       })
       .catch((e) => {
@@ -74,6 +99,46 @@ export default function App() {
         setLoading(false)
       })
   }, [])
+
+  const prompts = originalPrompts.map((p) => ({
+    ...p,
+    body: edits[p.id] !== undefined ? edits[p.id] : p.body,
+    originalBody: p.body,
+  }))
+
+  const handleSavePrompt = useCallback((id, newBody) => {
+    setEdits((prev) => {
+      const current = prev[id]
+      const original = originalPrompts.find((p) => p.id === id)
+      const previousBody = current !== undefined ? current : original?.body || ''
+
+      if (previousBody !== newBody) {
+        setVersions((vPrev) => {
+          const list = vPrev[id] || []
+          const entry = { body: previousBody, ts: Date.now() }
+          const updated = { ...vPrev, [id]: [...list, entry].slice(-20) }
+          localStorage.setItem(VERSIONS_KEY, JSON.stringify(updated))
+          return updated
+        })
+      }
+
+      const next = { ...prev, [id]: newBody }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [originalPrompts])
+
+  const handleRestore = useCallback((id, body) => {
+    setEdits((prev) => {
+      const next = { ...prev, [id]: body }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const getVersions = useCallback((id) => {
+    return (versions[id] || []).slice().reverse()
+  }, [versions])
 
   return (
     <>
@@ -91,7 +156,12 @@ export default function App() {
           </div>
         )}
         {!loading && !error && page === 'prompts' && (
-          <PromptViewer prompts={prompts} />
+          <PromptViewer
+            prompts={prompts}
+            onSave={handleSavePrompt}
+            getVersions={getVersions}
+            onRestore={handleRestore}
+          />
         )}
         {!loading && !error && page === 'playground' && (
           <Playground prompts={prompts} />

@@ -409,6 +409,194 @@
   overflow-y: auto;
 }
 
+/* Toolbar actions */
+
+.prompt-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tool-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-bright);
+  background: var(--accent-glow);
+}
+
+.tool-btn.active {
+  border-color: var(--accent);
+  color: var(--accent-bright);
+  background: var(--accent-glow);
+}
+
+.tool-btn.save-btn.ready {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.tool-btn.save-btn.ready:hover {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.tool-btn.save-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tool-btn.cancel-btn:hover {
+  border-color: #f87171;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.edited-badge {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+  color: var(--success) !important;
+}
+
+/* Edit textarea */
+
+.prompt-edit-area {
+  width: 100%;
+  min-height: 200px;
+  max-height: 500px;
+  padding: 1rem 1.15rem;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: none;
+  border-top: 2px solid var(--accent);
+  outline: none;
+  resize: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Versions panel */
+
+.versions-panel {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+  animation: slideDown 0.15s ease;
+}
+
+.versions-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.version-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.version-item:last-child {
+  border-bottom: none;
+}
+
+.version-item:hover {
+  background: var(--bg-card);
+}
+
+.version-time {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.version-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.version-preview-btn,
+.version-restore-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 0.65rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.version-preview-btn {
+  color: var(--text-secondary);
+}
+
+.version-preview-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-bright);
+}
+
+.version-restore-btn {
+  color: var(--warning);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.version-restore-btn:hover {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+/* Playground prompts badge */
+
+.playground-prompts-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: var(--success);
+}
+
+.pg-config-field-wide {
+  flex-basis: 100%;
+}
+
+.pg-config-info {
+  width: 100%;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0;
+  line-height: 1.5;
+}
+
 /* ===== PLAYGROUND ===== */
 
 .playground {
