@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import PromptViewer from './components/PromptViewer'
+import Playground from './components/Playground'
 import './App.css'
 
 function extractPrompts(data) {
@@ -31,11 +32,12 @@ function extractPrompts(data) {
     if (uniq.length === 0) continue
 
     const p = node.parameters || {}
-    const toolDesc = typeof p.toolDescription === 'string' && p.toolDescription.trim()
-      ? p.toolDescription.trim()
-      : typeof p.description === 'string' && p.description.length < 500
-        ? p.description
-        : ''
+    const toolDesc =
+      typeof p.toolDescription === 'string' && p.toolDescription.trim()
+        ? p.toolDescription.trim()
+        : typeof p.description === 'string' && p.description.length < 500
+          ? p.description
+          : ''
 
     for (let i = 0; i < uniq.length; i++) {
       prompts.push({
@@ -52,8 +54,7 @@ function extractPrompts(data) {
 
 export default function App() {
   const [prompts, setPrompts] = useState([])
-  const [selected, setSelected] = useState(null)
-  const [filter, setFilter] = useState('')
+  const [page, setPage] = useState('prompts')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -65,9 +66,7 @@ export default function App() {
       })
       .then((txt) => {
         const data = JSON.parse(txt)
-        const items = extractPrompts(data)
-        setPrompts(items)
-        if (items.length > 0) setSelected(items[0].id)
+        setPrompts(extractPrompts(data))
         setLoading(false)
       })
       .catch((e) => {
@@ -76,45 +75,26 @@ export default function App() {
       })
   }, [])
 
-  const q = filter.toLowerCase()
-  const filtered = q
-    ? prompts.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.type.toLowerCase().includes(q) ||
-          p.body.toLowerCase().includes(q)
-      )
-    : prompts
-
-  const active = prompts.find((p) => p.id === selected)
-
   return (
     <>
-      <Sidebar
-        prompts={filtered}
-        selected={selected}
-        onSelect={setSelected}
-        filter={filter}
-        onFilter={setFilter}
-        loading={loading}
-      />
+      <Sidebar page={page} onNavigate={setPage} />
       <main className="main-content">
         {loading && (
           <div className="state-msg">
             <div className="loader" />
-            <p>Carregando prompts...</p>
+            <p>Carregando...</p>
           </div>
         )}
         {error && (
           <div className="state-msg">
-            <p className="error-text">Erro ao carregar: {error}</p>
+            <p className="error-text">Erro: {error}</p>
           </div>
         )}
-        {!loading && !error && active && <PromptViewer prompt={active} />}
-        {!loading && !error && !active && (
-          <div className="state-msg">
-            <p>Selecione um prompt na sidebar.</p>
-          </div>
+        {!loading && !error && page === 'prompts' && (
+          <PromptViewer prompts={prompts} />
+        )}
+        {!loading && !error && page === 'playground' && (
+          <Playground prompts={prompts} />
         )}
       </main>
     </>

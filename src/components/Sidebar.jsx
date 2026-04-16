@@ -1,6 +1,11 @@
-import { Search, Sparkles, ChevronRight } from 'lucide-react'
+import { Sparkles, FileText, MessageSquare } from 'lucide-react'
 
-export default function Sidebar({ prompts, selected, onSelect, filter, onFilter, loading }) {
+const NAV_ITEMS = [
+  { id: 'prompts', label: 'Prompts', icon: FileText },
+  { id: 'playground', label: 'Playground', icon: MessageSquare },
+]
+
+export default function Sidebar({ page, onNavigate }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -10,49 +15,31 @@ export default function Sidebar({ prompts, selected, onSelect, filter, onFilter,
           </div>
           <div>
             <h1 className="logo-title">Agente Comercial</h1>
-            <span className="logo-sub">Prompts da IA</span>
+            <span className="logo-sub">Painel da IA</span>
           </div>
         </div>
       </div>
 
-      <div className="sidebar-search">
-        <Search size={16} className="search-icon" />
-        <input
-          type="text"
-          placeholder="Buscar prompt..."
-          value={filter}
-          onChange={(e) => onFilter(e.target.value)}
-        />
-      </div>
-
       <div className="sidebar-section">
-        <span className="section-label">Prompts</span>
-        <span className="section-count">{prompts.length}</span>
+        <span className="section-label">Menu</span>
       </div>
 
       <nav className="sidebar-nav">
-        {loading && (
-          <div className="nav-empty">
-            <div className="loader-sm" />
-          </div>
-        )}
-        {!loading && prompts.length === 0 && (
-          <div className="nav-empty">Nenhum encontrado</div>
-        )}
-        {prompts.map((p) => (
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
           <button
-            key={p.id}
-            className={`nav-item ${selected === p.id ? 'active' : ''}`}
-            onClick={() => onSelect(p.id)}
+            key={id}
+            className={`nav-item ${page === id ? 'active' : ''}`}
+            onClick={() => onNavigate(id)}
           >
-            <div className="nav-item-content">
-              <span className="nav-item-name">{p.name}</span>
-              <span className="nav-item-type">{p.type}</span>
-            </div>
-            <ChevronRight size={14} className="nav-item-arrow" />
+            <Icon size={18} className="nav-item-icon" />
+            <span className="nav-item-label">{label}</span>
           </button>
         ))}
       </nav>
+
+      <div className="sidebar-footer">
+        <span className="sidebar-version">v1.0</span>
+      </div>
     </aside>
   )
 }
