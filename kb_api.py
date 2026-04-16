@@ -1,6 +1,6 @@
 """
 Cockpit IA - Backend API
-FastAPI + PostgreSQL + OpenAI
+FastAPI + PostgreSQL + OpenAI + Supabase RAG
 """
 import os
 import re
@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from openai import OpenAI
 from dotenv import load_dotenv
+import supabase_rag
 
 load_dotenv()
 
@@ -97,7 +98,7 @@ async def lifespan(app):
     print("[API] Startup completo", flush=True)
     yield
 
-app = FastAPI(title="Cockpit IA - Cruzeiro do Sul", lifespan=lifespan)
+app = FastAPI(title="Cockpit IA", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 security = HTTPBasic(auto_error=False)
@@ -133,8 +134,11 @@ MODEL_PRICING = {
     'gpt-3.5-turbo':{'input': 0.50, 'output': 1.50},
 }
 
-DEFAULT_PROMPT = """Você é a assistente virtual de suporte da Cruzeiro do Sul Educacional.
-Seu nome é "Assistente Virtual Cruzeiro do Sul". Você NÃO é um atendente humano.
+DEFAULT_PROMPT = """Você é um orquestrador inteligente de atendimento educacional da Cruzeiro do Sul Virtual.
+Sua função é analisar mensagens e responder de forma profissional, acolhedora e direta, com foco em conversão.
+
+NUNCA invente informações. Só use dados retornados pelas buscas.
+Respostas curtas e objetivas. Sempre termine com uma pergunta de avanço de funil.
 
 {student_context}
 
@@ -142,33 +146,7 @@ Seu nome é "Assistente Virtual Cruzeiro do Sul". Você NÃO é um atendente hum
 
 {sentiment_context}
 
-## REGRAS ABSOLUTAS:
-1. **NUNCA INVENTE** URLs, valores, prazos ou procedimentos que NÃO apareçam nas referências abaixo.
-2. **NUNCA forneça dados pessoais** (RGM, e-mail acadêmico, senhas). Só um atendente humano pode fazer isso.
-3. Informações CONSISTENTES em MÚLTIPLAS referências são confiáveis.
-4. **NUNCA use nomes de atendentes** das referências (ex: Joyce, Camila). Você é a assistente virtual.
-5. Se conhecer o nome do aluno, **USE-O** para personalizar.
-6. **Quando o aluno responder a uma opção/botão**, interprete NO CONTEXTO do histórico.
-
-## EMPATIA:
-- Se o aluno parece frustrado, **valide o sentimento** antes de responder.
-- Se é retorno, seja eficiente e direto.
-- Se já tentou resolver, priorize escalação.
-
-## 3 NÍVEIS DE CONFIANÇA:
-### ALTO (0.8-1.0) → Responda normalmente
-### MÉDIO (0.5-0.7) → Responda E ofereça atendente
-### BAIXO (0.0-0.4) → Escale para humano
-
-## COMO RESPONDER:
-- Dê uma resposta COMPLETA e ÚTIL: inclua o passo a passo ou orientação prática que o aluno precisa para resolver.
-- Não seja vago. Se as referências têm detalhes (links, caminhos no portal, prazos), INCLUA.
-- Separe em blocos curtos (2-3 frases por bloco) usando quebras de linha para facilitar leitura.
-- Use *negrito* para termos-chave (formatação WhatsApp). Máximo 1 emoji por bloco.
-- Mantenha entre 3 e 6 frases no total. Nem telegráfico, nem textão.
-- Última linha OBRIGATÓRIA (oculta para o aluno): [CONFIANCA:X.X]
-
-## CONVERSAS DE REFERÊNCIA:
+## REFERÊNCIAS DA BASE DE CONHECIMENTO:
 {references}
 
 ## HISTÓRICO DESTA CONVERSA:
@@ -192,66 +170,8 @@ def get_db():
 
 
 def _seed_default_menus(cur):
-    """Popula agent_menus com a árvore padrão de menus."""
-    def ins(parent_id, level, key, label, text=None, rag=None, order=0):
-        cur.execute(
-            "INSERT INTO agent_menus (parent_id, level, menu_key, label, response_text, rag_question, sort_order) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (parent_id, level, key, label, text, rag, order))
-        return cur.fetchone()[0]
-
-    # L1 categories
-    l1_acesso = ins(None, 'L1', 'acesso', 'Acesso Portal/App', 'Sobre *Acesso*, qual sua dúvida?', None, 0)
-    l1_fin = ins(None, 'L1', 'financeiro', 'Financeiro', 'Sobre *Financeiro*, qual sua dúvida?', None, 1)
-    l1_acad = ins(None, 'L1', 'academico', 'Aulas e Conteúdo', 'Sobre *Aulas e Conteúdo*, qual sua dúvida?', None, 2)
-    l1_doc = ins(None, 'L1', 'documentos', 'Documentos', 'Sobre *Documentos*, o que precisa?', None, 3)
-    l1_remat = ins(None, 'L1', 'rematricula', 'Rematrícula', 'Sobre *Rematrícula*, qual sua dúvida?', None, 4)
-
-    # Acesso -> L2
-    l2_primeiro = ins(l1_acesso, 'L2', 'primeiro acesso', 'Primeiro acesso', 'Sobre *Primeiro Acesso*:', None, 0)
-    ins(l1_acesso, 'leaf', 'esqueci minha senha', 'Esqueci minha senha', None, 'esqueci minha senha do portal como redefinir', 1)
-    ins(l1_acesso, 'leaf', 'app duda', 'App Duda', None, 'como baixar e acessar o app Duda', 2)
-    ins(l1_acesso, 'leaf', 'blackboard / ava', 'Blackboard / AVA', None, 'como acessar o Blackboard ou ambiente virtual de aprendizagem', 3)
-    # Primeiro acesso -> leaf
-    ins(l2_primeiro, 'leaf', 'não recebi credenciais', 'Não recebi credenciais', None, 'não recebi meus dados de acesso credenciais do portal', 0)
-    ins(l2_primeiro, 'leaf', 'onde me cadastro', 'Onde me cadastro', None, 'onde faço cadastro para acessar o portal do aluno', 1)
-    ins(l2_primeiro, 'leaf', 'email acadêmico', 'Email acadêmico', None, 'qual meu email acadêmico e como acessar', 2)
-
-    # Financeiro -> L2
-    l2_boleto = ins(l1_fin, 'L2', 'boleto / pagamento', 'Boleto / Pagamento', 'Sobre *Boleto / Pagamento*:', None, 0)
-    l2_mensal = ins(l1_fin, 'L2', 'mensalidade / valores', 'Mensalidade / Valores', 'Sobre *Mensalidade / Valores*:', None, 1)
-    l2_negoc = ins(l1_fin, 'L2', 'negociar / parcelar', 'Negociar / Parcelar', 'Sobre *Negociação*:', None, 2)
-    ins(l1_fin, 'leaf', 'reembolso', 'Reembolso', None, 'como solicitar reembolso de pagamento', 3)
-    # Boleto -> leaf
-    ins(l2_boleto, 'leaf', 'segunda via do boleto', 'Segunda via do boleto', None, 'como gerar segunda via do boleto de pagamento', 0)
-    ins(l2_boleto, 'leaf', 'pagar com pix', 'Pagar com PIX', None, 'como pagar a mensalidade com PIX', 1)
-    ins(l2_boleto, 'leaf', 'boleto vencido', 'Boleto vencido', None, 'meu boleto venceu o que fazer como pagar boleto vencido', 2)
-    # Mensalidade -> leaf
-    ins(l2_mensal, 'leaf', 'valor da mensalidade', 'Valor da mensalidade', None, 'qual o valor da mensalidade e como consultar valores', 0)
-    ins(l2_mensal, 'leaf', 'desconto / bolsa', 'Desconto / Bolsa', None, 'como conseguir desconto ou bolsa na mensalidade', 1)
-    ins(l2_mensal, 'leaf', 'reajuste de mensalidade', 'Reajuste de mensalidade', None, 'por que a mensalidade teve reajuste e como contestar', 2)
-    # Negociar -> leaf
-    ins(l2_negoc, 'leaf', 'parcelar dívida', 'Parcelar dívida', None, 'como parcelar mensalidades em atraso', 0)
-    ins(l2_negoc, 'leaf', 'fazer acordo', 'Fazer acordo', None, 'como fazer acordo de pagamento de dívida', 1)
-    ins(l2_negoc, 'leaf', 'estou inadimplente', 'Estou inadimplente', None, 'estou inadimplente o que acontece como regularizar', 2)
-
-    # Acadêmico -> L2/leaf
-    ins(l1_acad, 'leaf', 'início das aulas', 'Início das aulas', None, 'quando começam as aulas do semestre', 0)
-    ins(l1_acad, 'leaf', 'disciplinas / grade', 'Disciplinas / Grade', None, 'como ver minhas disciplinas e grade curricular', 1)
-    l2_provas = ins(l1_acad, 'L2', 'provas / atividades', 'Provas / Atividades', 'Sobre *Provas e Atividades*:', None, 2)
-    ins(l1_acad, 'leaf', 'material didático', 'Material didático', None, 'como acessar o material didático das aulas', 3)
-    # Provas -> leaf
-    ins(l2_provas, 'leaf', 'datas das provas', 'Datas das provas', None, 'quando são as datas das provas do semestre', 0)
-    ins(l2_provas, 'leaf', 'prazo de atividades', 'Prazo de atividades', None, 'qual o prazo para entrega de atividades', 1)
-    ins(l2_provas, 'leaf', 'ver minhas notas', 'Ver minhas notas', None, 'como ver minhas notas e conceitos', 2)
-
-    # Documentos -> leaf
-    ins(l1_doc, 'leaf', 'declaração de matrícula', 'Declaração de matrícula', None, 'como emitir declaração de matrícula ou vínculo', 0)
-    ins(l1_doc, 'leaf', 'histórico escolar', 'Histórico escolar', None, 'como solicitar histórico escolar', 1)
-    ins(l1_doc, 'leaf', 'enviar documentos', 'Enviar documentos', None, 'como enviar documentos para a secretaria', 2)
-
-    # Rematrícula -> leaf
-    ins(l1_remat, 'leaf', 'como rematricular', 'Como rematricular', None, 'como fazer a rematrícula para o próximo semestre', 0)
-    ins(l1_remat, 'leaf', 'prazo de rematrícula', 'Prazo de rematrícula', None, 'qual o prazo para rematrícula do semestre', 1)
+    """Popula agent_menus com a árvore padrão de menus (vazio - configurar conforme necessidade)."""
+    pass
 
 
 def run_migrations():
@@ -367,27 +287,56 @@ def generate_embedding(text: str) -> list[float]:
 
 
 def rag_search(question: str, top_k: int = 5):
-    embedding = generate_embedding(question)
-    emb_str = ','.join(str(x) for x in embedding)
-    with get_db() as conn:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(f"""
-            SELECT * FROM (
-                SELECT id, pergunta_aluno, resposta_atendente, tema, whatsapp_buttons,
-                       cosine_similarity(embedding, ARRAY[{emb_str}]::float8[]) as score
-                FROM knowledge_base WHERE embedding IS NOT NULL
-            ) sub ORDER BY score DESC LIMIT {top_k}
-        """)
-        return cur.fetchall()
+    """Busca via Supabase vector search (todas as tabelas relevantes)."""
+    results_grad = supabase_rag.buscar_informacoes(question, top_k=top_k)
+    results_precos = supabase_rag.buscar_precos(question, top_k=3)
+    results_perguntas = supabase_rag.buscar_perguntas(question, top_k=3)
+
+    combined = []
+    for r in results_grad:
+        combined.append({
+            'id': r.get('id', 0),
+            'pergunta_aluno': r.get('content', '')[:200],
+            'resposta_atendente': r.get('content', ''),
+            'tema': 'GRADUACAO',
+            'whatsapp_buttons': None,
+            'score': r.get('similarity', 0),
+            'source': 'documents'
+        })
+    for r in results_precos:
+        combined.append({
+            'id': r.get('id', 0),
+            'pergunta_aluno': r.get('content', '')[:200],
+            'resposta_atendente': r.get('content', ''),
+            'tema': 'PRECOS',
+            'whatsapp_buttons': None,
+            'score': r.get('similarity', 0),
+            'source': 'documents_precos'
+        })
+    for r in results_perguntas:
+        combined.append({
+            'id': r.get('id', 0),
+            'pergunta_aluno': r.get('content', '')[:200],
+            'resposta_atendente': r.get('content', ''),
+            'tema': 'FAQ',
+            'whatsapp_buttons': None,
+            'score': r.get('similarity', 0),
+            'source': 'documents_perguntas'
+        })
+
+    combined.sort(key=lambda x: x.get('score', 0), reverse=True)
+    return combined[:top_k]
 
 
-def build_refs(results, min_score=0.5):
+def build_refs(results, min_score=0.3):
     refs = ''
     for i, r in enumerate(results):
-        if float(r['score']) < min_score:
+        score = float(r.get('score', 0))
+        if score < min_score:
             continue
-        refs += f"\n--- Ref {i+1} (tema: {r['tema'] or 'N/A'}, sim: {float(r['score']):.2f}) ---\n"
-        refs += f"Pergunta: {str(r['pergunta_aluno'])[:400]}\nResposta: {str(r['resposta_atendente'])[:600]}\n"
+        source = r.get('source', r.get('tema', 'N/A'))
+        refs += f"\n--- Ref {i+1} (fonte: {source}, sim: {score:.2f}) ---\n"
+        refs += f"{str(r.get('resposta_atendente', ''))[:800]}\n"
     return refs or "Nenhuma referência encontrada."
 
 
@@ -714,189 +663,22 @@ CLOSING_WORDS = {'obrigado', 'obrigada', 'valeu', 'vlw', 'tchau', 'até mais', '
 
 GREETING_MENU = {
     'type': 'flow_menu',
-    'text': 'Olá! Bem-vindo ao Suporte ao Aluno da *Cruzeiro do Sul* 😊\n\nComo posso te ajudar?',
+    'text': 'Olá! Bem-vindo(a) 😊\n\nComo posso te ajudar?',
     'buttons': [
-        {'id': 'acesso', 'title': '🔑 Acesso Portal/App'},
-        {'id': 'financeiro', 'title': '💰 Financeiro'},
-        {'id': 'academico', 'title': '📚 Aulas e Conteúdo'},
-    ],
-    'buttons2': [
-        {'id': 'documentos', 'title': '📄 Documentos'},
-        {'id': 'rematricula', 'title': '🔄 Rematrícula'},
         {'id': 'atendente', 'title': '👤 Falar com atendente'},
-    ]
+    ],
+    'buttons2': []
 }
 
-SUBMENU = {
-    'financeiro': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Financeiro*, qual sua dúvida?',
-        'buttons': [
-            {'id': 'boleto', 'title': '🧾 Boleto / Pagamento'},
-            {'id': 'mensalidade', 'title': '💳 Mensalidade / Valores'},
-            {'id': 'negociacao', 'title': '🤝 Negociação / Parcelamento'},
-        ],
-        'buttons2': [
-            {'id': 'reembolso', 'title': '💸 Reembolso'},
-            {'id': 'fin_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'acesso': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Acesso*, qual sua dúvida?',
-        'buttons': [
-            {'id': 'primeiro_acesso', 'title': '🆕 Primeiro acesso'},
-            {'id': 'esqueci_senha', 'title': '🔑 Esqueci minha senha'},
-            {'id': 'app_duda', 'title': '📱 App Duda'},
-        ],
-        'buttons2': [
-            {'id': 'blackboard', 'title': '🖥️ Blackboard / AVA'},
-            {'id': 'acesso_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'academico': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Aulas e Conteúdo*, qual sua dúvida?',
-        'buttons': [
-            {'id': 'inicio_aulas', 'title': '📅 Início das aulas'},
-            {'id': 'disciplinas', 'title': '📖 Disciplinas / Grade'},
-            {'id': 'provas', 'title': '📝 Provas / Atividades'},
-        ],
-        'buttons2': [
-            {'id': 'material', 'title': '📚 Material didático'},
-            {'id': 'acad_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'documentos': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Documentos*, o que precisa?',
-        'buttons': [
-            {'id': 'declaracao', 'title': '📋 Declaração de matrícula'},
-            {'id': 'historico', 'title': '📄 Histórico escolar'},
-            {'id': 'enviar_doc', 'title': '📎 Enviar documentos'},
-        ],
-        'buttons2': [
-            {'id': 'doc_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'rematricula': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Rematrícula*, qual sua dúvida?',
-        'buttons': [
-            {'id': 'como_rematricular', 'title': '🔄 Como rematricular'},
-            {'id': 'prazo_rematricula', 'title': '📅 Prazo de rematrícula'},
-            {'id': 'rematricula_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-}
+SUBMENU = {}
 
-SUBMENU_L3 = {
-    'boleto': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Boleto / Pagamento*:',
-        'buttons': [
-            {'id': 'boleto_2via', 'title': '📄 Segunda via do boleto'},
-            {'id': 'boleto_pix', 'title': '💠 Pagar com PIX'},
-            {'id': 'boleto_vencido', 'title': '⚠️ Boleto vencido'},
-        ],
-        'buttons2': [
-            {'id': 'boleto_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'mensalidade': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Mensalidade / Valores*:',
-        'buttons': [
-            {'id': 'mens_valor', 'title': '💲 Valor da mensalidade'},
-            {'id': 'mens_desconto', 'title': '🏷️ Desconto / Bolsa'},
-            {'id': 'mens_reajuste', 'title': '📈 Reajuste de mensalidade'},
-        ],
-        'buttons2': [
-            {'id': 'mens_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'negociacao': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Negociação / Parcelamento*:',
-        'buttons': [
-            {'id': 'neg_parcelar', 'title': '💳 Parcelar dívida'},
-            {'id': 'neg_acordo', 'title': '🤝 Fazer acordo'},
-            {'id': 'neg_inadimplente', 'title': '🔒 Estou inadimplente'},
-        ],
-        'buttons2': [
-            {'id': 'neg_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'primeiro_acesso': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Primeiro Acesso*:',
-        'buttons': [
-            {'id': 'pa_credenciais', 'title': '📧 Não recebi credenciais'},
-            {'id': 'pa_onde', 'title': '🌐 Onde me cadastro'},
-            {'id': 'pa_email', 'title': '📨 Email acadêmico'},
-        ],
-        'buttons2': [
-            {'id': 'pa_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-    'provas': {
-        'type': 'flow_submenu',
-        'text': 'Sobre *Provas e Atividades*:',
-        'buttons': [
-            {'id': 'prova_data', 'title': '📅 Datas das provas'},
-            {'id': 'prova_prazo', 'title': '⏰ Prazo de atividades'},
-            {'id': 'prova_nota', 'title': '📊 Ver minhas notas'},
-        ],
-        'buttons2': [
-            {'id': 'prova_atendente', 'title': '👤 Falar com atendente'},
-        ]
-    },
-}
+SUBMENU_L3 = {}
 
-SUBMENU_TO_QUESTION = {
-    'boleto_2via': 'como gerar segunda via do boleto de pagamento',
-    'boleto_pix': 'como pagar a mensalidade com PIX',
-    'boleto_vencido': 'meu boleto venceu o que fazer como pagar boleto vencido',
-    'mens_valor': 'qual o valor da mensalidade e como consultar valores',
-    'mens_desconto': 'como conseguir desconto ou bolsa na mensalidade',
-    'mens_reajuste': 'por que a mensalidade teve reajuste e como contestar',
-    'neg_parcelar': 'como parcelar mensalidades em atraso',
-    'neg_acordo': 'como fazer acordo de pagamento de dívida',
-    'neg_inadimplente': 'estou inadimplente o que acontece como regularizar',
-    'reembolso': 'como solicitar reembolso de pagamento',
-    'pa_credenciais': 'não recebi meus dados de acesso credenciais do portal',
-    'pa_onde': 'onde faço cadastro para acessar o portal do aluno',
-    'pa_email': 'qual meu email acadêmico e como acessar',
-    'esqueci_senha': 'esqueci minha senha do portal como redefinir',
-    'app_duda': 'como baixar e acessar o app Duda',
-    'blackboard': 'como acessar o Blackboard ou ambiente virtual de aprendizagem',
-    'inicio_aulas': 'quando começam as aulas do semestre',
-    'disciplinas': 'como ver minhas disciplinas e grade curricular',
-    'prova_data': 'quando são as datas das provas do semestre',
-    'prova_prazo': 'qual o prazo para entrega de atividades',
-    'prova_nota': 'como ver minhas notas e conceitos',
-    'material': 'como acessar o material didático das aulas',
-    'declaracao': 'como emitir declaração de matrícula ou vínculo',
-    'historico': 'como solicitar histórico escolar',
-    'enviar_doc': 'como enviar documentos para a secretaria',
-    'como_rematricular': 'como fazer a rematrícula para o próximo semestre',
-    'prazo_rematricula': 'qual o prazo para rematrícula do semestre',
-}
+SUBMENU_TO_QUESTION = {}
 
-MAIN_MENU_KEYS = {
-    'acesso portal/app': 'acesso', 'acesso': 'acesso',
-    'financeiro': 'financeiro',
-    'aulas e conteúdo': 'academico', 'aulas': 'academico',
-    'documentos': 'documentos',
-    'rematrícula': 'rematricula', 'rematricula': 'rematricula',
-}
+MAIN_MENU_KEYS = {}
 
 L2_TO_L3_KEYS = {
-    'boleto / pagamento': 'boleto', 'boleto': 'boleto',
-    'mensalidade / valores': 'mensalidade', 'mensalidade': 'mensalidade',
-    'negociação / parcelamento': 'negociacao', 'negociacao / parcelamento': 'negociacao',
-    'primeiro acesso': 'primeiro_acesso',
-    'provas / atividades': 'provas', 'provas': 'provas',
 }
 
 
@@ -1081,7 +863,7 @@ async def test_question(data: TestRequest):
         history_text = ''
         if data.history:
             for h in data.history[-4:]:
-                role = 'Aluno' if h.get('role') == 'user' else 'Assistente'
+                role = 'Usuario' if h.get('role') == 'user' else 'Assistente'
                 history_text += f"{role}: {h.get('text', '')[:200]}\n"
 
         # Build student/memory/sentiment context
@@ -1102,8 +884,8 @@ async def test_question(data: TestRequest):
                         ld = leads[0]
                         student_info = {'name': ld.get('name', ''), 'cpf': ld.get('taxId', ''),
                                        'tags': [t.get('name', '') for t in ld.get('tags', [])]}
-                        fname = ld.get('name', '').split()[0].capitalize() if ld.get('name') else 'aluno'
-                        student_ctx = f"## DADOS DO ALUNO:\n- Nome: {ld.get('name','')}\n- Tags: {', '.join(student_info['tags'])}\n\nChame o aluno de *{fname}*."
+                        fname = ld.get('name', '').split()[0].capitalize() if ld.get('name') else ''
+                        student_ctx = f"## DADOS DO CONTATO:\n- Nome: {ld.get('name','')}\n- Tags: {', '.join(student_info['tags'])}"
             except Exception:
                 pass
 
@@ -1156,12 +938,13 @@ async def test_question(data: TestRequest):
 
         return {
             **llm,
-            'whatsapp_buttons': best_wa,
+            'whatsapp_buttons': None,
             'flow_buttons': flow_buttons,
             'referencias': [
-                {'id': r['id'], 'pergunta': str(r['pergunta_aluno'])[:200], 'resposta': str(r['resposta_atendente'])[:300],
-                 'tema': r['tema'], 'score': round(float(r['score']), 3),
-                 'whatsapp_buttons': r.get('whatsapp_buttons')} for r in results
+                {'id': r.get('id', 0), 'pergunta': str(r.get('pergunta_aluno', ''))[:200],
+                 'resposta': str(r.get('resposta_atendente', ''))[:300],
+                 'tema': r.get('tema', ''), 'score': round(float(r.get('score', 0)), 3),
+                 'source': r.get('source', '')} for r in results
             ]
         }
     except HTTPException:
@@ -1207,8 +990,10 @@ async def playground(data: PlaygroundRequest):
     return {
         **llm,
         'referencias': [
-            {'id': r['id'], 'pergunta': str(r['pergunta_aluno'])[:200], 'resposta': str(r['resposta_atendente'])[:300],
-             'tema': r['tema'], 'score': round(float(r['score']), 3)} for r in results
+            {'id': r.get('id', 0), 'pergunta': str(r.get('pergunta_aluno', ''))[:200],
+             'resposta': str(r.get('resposta_atendente', ''))[:300],
+             'tema': r.get('tema', ''), 'score': round(float(r.get('score', 0)), 3),
+             'source': r.get('source', '')} for r in results
         ]
     }
 
@@ -2267,11 +2052,11 @@ AGENT_CONFIG_DEFAULTS = {
     "poll_interval": 3,
     "confidence_threshold": 0.5,
     "response_cooldown": 2.0,
-    "greeting_returning": "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nNa última vez que conversamos, você estava com algumas dúvidas sobre *{topic}* — espero que tenha conseguido te ajudar naquele momento.\n\nAgora me conta: como posso te ajudar hoje?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇",
-    "greeting_returning_no_topic": "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nNa última vez que conversamos, você estava com algumas dúvidas — espero que tenha conseguido te ajudar naquele momento.\n\nAgora me conta: como posso te ajudar hoje?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇",
-    "greeting_new": "Olá, *{fname}*! Bem-vindo(a) ao Suporte da *Cruzeiro do Sul* 😊\n\nComo posso te ajudar?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇",
-    "greeting_anonymous": "Olá! Bem-vindo ao Suporte ao Aluno da *Cruzeiro do Sul* 😊\n\nComo posso te ajudar?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇",
-    "greeting_buttons": ["Acesso Portal/App", "Financeiro", "Aulas e Conteúdo", "Documentos", "Rematrícula", "Falar com atendente"],
+    "greeting_returning": "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nComo posso te ajudar hoje?",
+    "greeting_returning_no_topic": "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nComo posso te ajudar hoje?",
+    "greeting_new": "Olá, *{fname}*! Bem-vindo(a) 😊\n\nComo posso te ajudar?",
+    "greeting_anonymous": "Olá! Bem-vindo(a) 😊\n\nComo posso te ajudar?",
+    "greeting_buttons": ["Falar com atendente"],
 }
 
 

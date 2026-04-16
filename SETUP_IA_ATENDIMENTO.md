@@ -1,8 +1,8 @@
-# IA de Atendimento ao Aluno - Guia de Setup
+# IA de Atendimento - Guia de Setup
 
 ## Visao Geral
 
-Sistema de IA para atendimento automatico de alunos via WhatsApp (DataCrazy), usando RAG (Retrieval-Augmented Generation) com historico de 531K+ mensagens de suporte.
+Sistema de IA para atendimento automatico via WhatsApp (DataCrazy), usando RAG (Retrieval-Augmented Generation).
 
 **Arquitetura:** DataCrazy (WhatsApp) -> n8n (orquestracao) -> OpenAI (IA) -> PostgreSQL (knowledge base)
 

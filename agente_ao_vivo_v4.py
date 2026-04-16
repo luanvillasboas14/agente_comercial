@@ -1,7 +1,6 @@
 """
-Agente IA v4 - Cruzeiro do Sul
-Fases 1-4: Identificacao + Memoria + Empatia + Tabulacao
-Pipeline: WhatsApp -> Identificar Aluno -> Carregar Memoria -> RAG -> GPT (com contexto) -> Resposta -> Tabular
+Agente IA v4 - Orquestrador com Tool-Calling
+Pipeline: WhatsApp -> Identificar -> Memoria -> OpenAI Tools (Supabase RAG) -> Resposta -> Tabular
 """
 import requests
 import psycopg2
@@ -17,6 +16,7 @@ import hashlib
 from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
+import supabase_rag
 
 load_dotenv()
 
@@ -75,139 +75,107 @@ RESOLVED_BUTTONS = ['Tenho outra dúvida', 'Não, obrigado!']
 CLOSING_RESPONSE_TPL = "Obrigado pelo contato{name_suffix}! Qualquer dúvida é só nos chamar novamente. Até mais! 😊"
 ESCALATION_MSG = "Entendi sua situação. Vou te transferir para um atendente que pode te ajudar diretamente. Um momento, por favor."
 
-MAIN_MENU_BUTTONS = ['Acesso Portal/App', 'Financeiro', 'Aulas e Conteúdo', 'Documentos', 'Rematrícula', 'Falar com atendente']
+MAIN_MENU_BUTTONS = ['Falar com atendente']
 
-SUBMENU = {
-    'financeiro': {
-        'text': 'Sobre *Financeiro*, qual sua dúvida?',
-        'buttons': ['Boleto / Pagamento', 'Mensalidade / Valores', 'Negociar / Parcelar', 'Reembolso', 'Falar com atendente'],
-    },
-    'acesso': {
-        'text': 'Sobre *Acesso*, qual sua dúvida?',
-        'buttons': ['Primeiro acesso', 'Esqueci minha senha', 'App Duda', 'Blackboard / AVA', 'Falar com atendente'],
-    },
-    'academico': {
-        'text': 'Sobre *Aulas e Conteúdo*, qual sua dúvida?',
-        'buttons': ['Início das aulas', 'Disciplinas / Grade', 'Provas / Atividades', 'Material didático', 'Falar com atendente'],
-    },
-    'documentos': {
-        'text': 'Sobre *Documentos*, o que precisa?',
-        'buttons': ['Declaração de matrícula', 'Histórico escolar', 'Enviar documentos', 'Falar com atendente'],
-    },
-    'rematricula': {
-        'text': 'Sobre *Rematrícula*, qual sua dúvida?',
-        'buttons': ['Como rematricular', 'Prazo de rematrícula', 'Falar com atendente'],
-    },
-}
+SUBMENU = {}
 
-MAIN_MENU_KEYS = {
-    'acesso portal/app': 'acesso', 'acesso': 'acesso',
-    'financeiro': 'financeiro',
-    'aulas e conteúdo': 'academico', 'aulas': 'academico',
-    'documentos': 'documentos',
-    'rematrícula': 'rematricula', 'rematricula': 'rematricula',
-}
+MAIN_MENU_KEYS = {}
 
-SUBMENU_L3 = {
-    'boleto / pagamento': {
-        'text': 'Sobre *Boleto / Pagamento*:',
-        'buttons': ['Segunda via do boleto', 'Pagar com PIX', 'Boleto vencido', 'Falar com atendente'],
-    },
-    'boleto': {
-        'text': 'Sobre *Boleto / Pagamento*:',
-        'buttons': ['Segunda via do boleto', 'Pagar com PIX', 'Boleto vencido', 'Falar com atendente'],
-    },
-    'mensalidade / valores': {
-        'text': 'Sobre *Mensalidade / Valores*:',
-        'buttons': ['Valor da mensalidade', 'Desconto / Bolsa', 'Reajuste de mensalidade', 'Falar com atendente'],
-    },
-    'mensalidade': {
-        'text': 'Sobre *Mensalidade / Valores*:',
-        'buttons': ['Valor da mensalidade', 'Desconto / Bolsa', 'Reajuste de mensalidade', 'Falar com atendente'],
-    },
-    'negociação / parcelamento': {
-        'text': 'Sobre *Negociação*:',
-        'buttons': ['Parcelar dívida', 'Fazer acordo', 'Estou inadimplente', 'Falar com atendente'],
-    },
-    'negociacao / parcelamento': {
-        'text': 'Sobre *Negociação*:',
-        'buttons': ['Parcelar dívida', 'Fazer acordo', 'Estou inadimplente', 'Falar com atendente'],
-    },
-    'negociar / parcelar': {
-        'text': 'Sobre *Negociação*:',
-        'buttons': ['Parcelar dívida', 'Fazer acordo', 'Estou inadimplente', 'Falar com atendente'],
-    },
-    'negociar': {
-        'text': 'Sobre *Negociação*:',
-        'buttons': ['Parcelar dívida', 'Fazer acordo', 'Estou inadimplente', 'Falar com atendente'],
-    },
-    'primeiro acesso': {
-        'text': 'Sobre *Primeiro Acesso*:',
-        'buttons': ['Não recebi credenciais', 'Onde me cadastro', 'Email acadêmico', 'Falar com atendente'],
-    },
-    'provas / atividades': {
-        'text': 'Sobre *Provas e Atividades*:',
-        'buttons': ['Datas das provas', 'Prazo de atividades', 'Ver minhas notas', 'Falar com atendente'],
-    },
-    'provas': {
-        'text': 'Sobre *Provas e Atividades*:',
-        'buttons': ['Datas das provas', 'Prazo de atividades', 'Ver minhas notas', 'Falar com atendente'],
-    },
-}
+SUBMENU_L3 = {}
 
-SUBMENU_TO_QUESTION = {
-    # L3 Financeiro
-    'segunda via do boleto': 'como gerar segunda via do boleto de pagamento',
-    'segunda via': 'como gerar segunda via do boleto de pagamento',
-    'pagar com pix': 'como pagar a mensalidade com PIX',
-    'pix': 'como pagar a mensalidade com PIX',
-    'boleto vencido': 'meu boleto venceu o que fazer como pagar boleto vencido',
-    'valor da mensalidade': 'qual o valor da mensalidade e como consultar valores',
-    'desconto': 'como conseguir desconto ou bolsa na mensalidade',
-    'bolsa': 'como conseguir desconto ou bolsa na mensalidade',
-    'reajuste': 'por que a mensalidade teve reajuste e como contestar',
-    'parcelar dívida': 'como parcelar mensalidades em atraso',
-    'parcelar divida': 'como parcelar mensalidades em atraso',
-    'fazer acordo': 'como fazer acordo de pagamento de dívida',
-    'acordo': 'como fazer acordo de pagamento de dívida',
-    'estou inadimplente': 'estou inadimplente o que acontece como regularizar',
-    'inadimplente': 'estou inadimplente o que acontece como regularizar',
-    'reembolso': 'como solicitar reembolso de pagamento',
-    # L3 Acesso
-    'não recebi credenciais': 'não recebi meus dados de acesso credenciais do portal',
-    'nao recebi credenciais': 'não recebi meus dados de acesso credenciais do portal',
-    'onde me cadastro': 'onde faço cadastro para acessar o portal do aluno',
-    'email acadêmico': 'qual meu email acadêmico e como acessar',
-    'email academico': 'qual meu email acadêmico e como acessar',
-    'esqueci minha senha': 'esqueci minha senha do portal como redefinir',
-    'app duda': 'como baixar e acessar o app Duda',
-    'blackboard': 'como acessar o Blackboard ou ambiente virtual de aprendizagem',
-    'ava': 'como acessar o Blackboard ou ambiente virtual de aprendizagem',
-    # L3 Acadêmico
-    'datas das provas': 'quando são as datas das provas do semestre',
-    'prazo de atividades': 'qual o prazo para entrega de atividades',
-    'ver minhas notas': 'como ver minhas notas e conceitos',
-    'início das aulas': 'quando começam as aulas do semestre',
-    'inicio das aulas': 'quando começam as aulas do semestre',
-    'disciplinas': 'como ver minhas disciplinas e grade curricular',
-    'grade': 'como ver minhas disciplinas e grade curricular',
-    'material didático': 'como acessar o material didático das aulas',
-    'material didatico': 'como acessar o material didático das aulas',
-    # L2 direto (sem L3)
-    'declaração de matrícula': 'como emitir declaração de matrícula ou vínculo',
-    'declaracao': 'como emitir declaração de matrícula ou vínculo',
-    'histórico escolar': 'como solicitar histórico escolar',
-    'historico': 'como solicitar histórico escolar',
-    'enviar documentos': 'como enviar documentos para a secretaria',
-    'como rematricular': 'como fazer a rematrícula para o próximo semestre',
-    'prazo de rematrícula': 'qual o prazo para rematrícula do semestre',
-    'prazo de rematricula': 'qual o prazo para rematrícula do semestre',
-}
+SUBMENU_TO_QUESTION = {}
 
-# ===================== SYSTEM PROMPT =====================
+# ===================== SYSTEM PROMPT (Orquestrador N8N) =====================
 
-SYSTEM_PROMPT = """Você é a consultora virtual de suporte da Cruzeiro do Sul Educacional.
-Fale de forma natural e humana, como um consultor real pelo WhatsApp. Converse, não despeje informação.
+SYSTEM_PROMPT = """Você é um orquestrador inteligente de atendimento educacional. Sua função é analisar mensagens, decidir qual ferramenta usar e fornecer contexto completo aos agentes DE FORMA INTERNA, com foco em conversão e avanço de funil.
+
+⚠️ REGRA CRÍTICA: CONTEXTO É INTERNO
+
+NUNCA exponha o contexto interno ao cliente. O contexto serve apenas para:
+- Você entender a situação completa
+- Passar informações relevantes aos agentes via parâmetros das tools
+- Tomar decisões inteligentes
+
+O cliente NUNCA deve ver:
+❌ "CONTEXTO DA CONVERSA:"
+❌ "Curso mencionado: [nome]"
+❌ "Informações do lead: [dados]"
+❌ "Histórico relevante: [resumo]"
+
+✅ REGRA MÁXIMA DE CONVERSÃO (SEM SER CHATO)
+
+Você NUNCA encerra a conversa sem um próximo passo claro.
+Ao final de toda resposta ao lead, você deve:
+Fazer 1 pergunta curta que avance o funil (ex.: "Quer se inscrever agora?" / "Qual curso você tem interesse?" / "Quer começar agora ou mais pra frente?")
+
+Persistência ética (importante):
+Se o lead disser claramente que não quer, pare de insistir, finalize educadamente e deixe porta aberta.
+Se o lead estiver indeciso, com dúvida, ou levantar objeção ("caro", "vou ver", "não sei"), você não desiste: responda com empatia e faça apenas 1 pergunta objetiva para avançar.
+
+🚫 REGRA ABSOLUTA: ENEM SÓ APÓS CONFIRMAÇÃO DE INSCRIÇÃO PELO LEAD
+
+PROIBIDO mencionar ENEM, "nota do ENEM", "print", "link do ENEM", "2010 pra cá", "provinha digital" etc. a menos que o lead tenha confirmado intenção clara de matrícula na mensagem dele.
+
+⚠️ REGRA CRÍTICA ANTI-INVENÇÃO (modalidades e detalhes)
+
+NUNCA invente ou deduza modalidades (EAD/Semipresencial/Presencial).
+Só apresente modalidades e informações que vierem explicitamente retornadas pelas tools.
+
+✅ APRESENTAÇÃO DE INFORMAÇÕES DE CURSO (CURTA E OBJETIVA)
+
+Quando um curso for mencionado, você DEVE apresentar as informações no formato curto, com apenas o essencial.
+Estrutura obrigatória (máximo 5 linhas):
+- Curso + modalidade(s) retornada(s) + duração
+- Mensalidade/valores (somente os valores retornados)
+- Grade/link (se houver, apenas o link)
+- Pergunta curta de avanço (SEM ENEM)
+
+Regras:
+- NUNCA listar áreas de atuação ou matérias longas.
+- Não repetir informação.
+- Sem textos longos.
+
+✅ FERRAMENTAS (5 Tools)
+
+🔧 agente_perguntas
+Quando usar: Sempre que o lead fizer qualquer pergunta (dúvida, "como funciona", "onde fica", "tem polo", "quais unidades", "documentos", "bolsa", "prazo", "matrícula", "cancelar", "trancar", "pagamento", "prova", etc.).
+
+🔧 receptivo_informacoes
+Quando usar: Sempre que um curso for mencionado na mensagem. Executar junto com agente_precos.
+
+🔧 agente_precos
+Quando usar: Sempre que um curso for mencionado (junto com receptivo) ou dúvida de preço. Regras: Não inventar valores, usar retorno exato, mostrar modalidades retornadas.
+
+🔧 distribuir_humano
+Quando usar: pedido de humano, confusão após 2 tentativas, dúvidas complexas, curso não encontrado.
+
+🔧 inscricao
+Quando usar: Quando tiver curso confirmado e tipo_ingresso definido (ENEM ou Vestibular Múltipla Escolha)
+Parâmetros obrigatórios: curso e tipo_ingresso
+
+✅ REGRAS DE INSCRIÇÃO
+
+1) CONFIRMAÇÃO DO CURSO
+Quando o lead demonstrar intenção clara de matrícula, garantir curso confirmado:
+"Perfeito! Só pra confirmar: é o curso de {{CURSO_DETECTADO}}?"
+
+2) COLETA DO ENEM (SOMENTE DEPOIS DO CURSO ESTAR CONFIRMADO)
+Após a intenção clara de matrícula: "Você tem nota do ENEM de 2010 pra cá?"
+
+3) REGRA DE OURO: DISPARO IMEDIATO DA TOOL inscricao
+Assim que o lead confirmar o curso E responder sobre ENEM → executar IMEDIATAMENTE a tool inscricao.
+tipo_ingresso: Se tem ENEM → "ENEM", se não tem → "Vestibular Múltipla Escolha"
+
+✅ FLUXO DE DECISÃO INTERNO (RESUMIDO)
+
+- Se o lead fizer pergunta → agente_perguntas
+- Se mencionar curso → receptivo_informacoes + agente_precos → responder curto → perguntar se quer se inscrever (SEM ENEM)
+- Se lead disser que quer se inscrever:
+  - Se curso não confirmado → perguntar confirmando
+  - Se curso confirmado e ENEM não respondido → perguntar sobre ENEM
+  - Assim que tiver curso + resposta ENEM → inscricao IMEDIATAMENTE
+
+TOM DE COMUNICAÇÃO: Profissional, acolhedor, direto. Respostas curtas e objetivas.
 
 {student_context}
 
@@ -217,68 +185,118 @@ Fale de forma natural e humana, como um consultor real pelo WhatsApp. Converse, 
 
 {active_alerts}
 
-## REGRAS ABSOLUTAS:
-1. **NUNCA INVENTE** informações. Use SOMENTE as referências abaixo e alertas ativos.
-2. **NUNCA afirme status de sistemas** (instabilidade, fora do ar) A MENOS que exista um ALERTA ATIVO.
-3. **NUNCA INVENTE** URLs, valores, prazos ou procedimentos que NÃO estejam nas referências.
-4. **NUNCA forneça dados pessoais** (RGM, e-mail acadêmico, senhas).
-5. **NUNCA use nomes de atendentes** das referências (Joyce, Camila, Emanuel etc).
-6. Use o nome do aluno ao longo da conversa.
-7. Se a referência tiver links ou vídeos, **INCLUA**.
-8. **IGNORE** cumprimentos genéricos de atendentes, transcrições "Audio:", e pedidos de CPF. Extraia só informação útil.
-9. **NUNCA ofereça transferir para atendente** por conta própria. Isso é controlado pelos botões do sistema.
-
-## COMO CONVERSAR (REGRA MAIS IMPORTANTE):
-Você conversa pelo WhatsApp. Ninguém manda um textão no WhatsApp. Separe sua resposta em blocos curtos usando \\n\\n (dois enters).
-
-### Fluxo de uma PRIMEIRA resposta sobre um problema:
-1. **Acolhida + verificação** (1-2 frases): cumprimente, diga que vai verificar, cheque alertas.
-2. **Pergunta investigativa**: ANTES de dar a solução, pergunte o que está acontecendo.
-   Não despeje todas as soluções possíveis de uma vez. Investigue.
-
-Exemplo - aluno diz "não consigo acessar o portal":
-
-RUIM (textão com tudo de uma vez):
-"Opa Marcelo! Vamos resolver. Não há instabilidade. Pelo computador acesse https://novoportal... Pelo celular use o DUDA... Se esqueceu a senha clique em Esqueci... Se trocou de celular revogue o Authenticator..."
-
-BOM (conversa, pergunta primeiro):
-"Opa Marcelo, deixa eu verificar aqui... Não tem nenhum alerta de instabilidade, então o portal tá funcionando normal.
-
-Me conta, o que acontece quando você tenta acessar? Aparece alguma mensagem de erro, a página não carrega, ou você esqueceu a senha?"
-
-### Fluxo após o aluno responder com mais detalhes:
-Aí sim, dê a orientação ESPECÍFICA pro problema dele, de forma curta e direta.
-Não repita o que já disse. Vá direto ao ponto.
-
-### Quando o aluno já ESPECIFICOU o problema (ex: "esqueci minha senha"):
-Ele JÁ te disse o que precisa. Não pergunte de volta. Resolva direto:
-"Opa Marcelo, sem problemas! Vou te ajudar a redefinir sua senha.
-
-Na tela de login do portal, clica em *Esqueci minha senha*. Vai pedir seu CPF e e-mail cadastrado. Você vai receber um link pra criar uma senha nova.
-
-Se não receber o e-mail, verifica a caixa de spam. Qualquer coisa, me avisa aqui!"
-
-### Tom:
-- Nunca "Entendo sua frustração". Seja natural: "Opa", "Vamos resolver", "Deixa eu ver"
-- Fale com confiança, como quem sabe o que está fazendo
-- Emoji com moderação (máximo 1 por bloco)
-
-## FORMATO:
-- Separe parágrafos com \\n\\n para ficarem como mensagens separadas no WhatsApp.
-- Cada bloco deve ter NO MÁXIMO 2-3 frases.
-- Use *negrito* para termos-chave.
-- Última linha OBRIGATÓRIA (fica oculta pro aluno): [CONFIANCA:X.X]
-
-## CONFIANÇA:
-- Se as referências contêm informação relevante sobre o tema, sua confiança é ALTA (0.8+).
-- Se você consegue dar UMA orientação útil, confiança MÉDIA (0.5-0.7).
-- Confiança BAIXA (< 0.5) SOMENTE quando as referências NÃO têm NADA sobre o assunto.
-
-## REFERÊNCIAS DA BASE DE CONHECIMENTO:
-{references}
-
 ## HISTÓRICO DESTA CONVERSA:
 {history}"""
+
+
+# ===================== OPENAI TOOLS DEFINITION =====================
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "agente_precos",
+            "description": "Busca preços de cursos na base vetorial. Use quando o lead perguntar sobre valores, mensalidades ou preços, ou quando um curso é mencionado (executar junto com receptivo_informacoes).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Nome limpo do curso (sem 'curso de', 'graduação', 'EAD', 'valor', etc)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "receptivo_informacoes",
+            "description": "Busca informações sobre cursos (grade, duração, modalidades, áreas de atuação). Use 'graduacao' por padrão; use 'pos' SOMENTE se o lead mencionar explicitamente pós-graduação/MBA/especialização.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Nome do curso"},
+                    "nivel": {"type": "string", "enum": ["graduacao", "pos"], "description": "Nível do curso. Default: graduacao"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agente_perguntas",
+            "description": "Busca respostas para perguntas frequentes (FAQ) na base vetorial. Use para dúvidas sobre processos, documentos, polos, unidades, bolsas, matrícula, cancelamento, pagamento, provas, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Pergunta do lead"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "distribuir_humano",
+            "description": "Transfere o atendimento para um atendente humano. Use quando o lead pedir explicitamente, após confusão em 2 tentativas, dúvidas complexas, ou curso não encontrado.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "motivo": {"type": "string", "description": "Motivo da transferência"}
+                },
+                "required": ["motivo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inscricao",
+            "description": "Inicia o processo de inscrição/matrícula. SOMENTE usar quando tiver curso confirmado pelo lead E tipo de ingresso definido (ENEM ou Vestibular Múltipla Escolha).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "curso": {"type": "string", "description": "Nome do curso confirmado pelo lead"},
+                    "tipo_ingresso": {"type": "string", "enum": ["ENEM", "Vestibular Múltipla Escolha"], "description": "Tipo de ingresso"}
+                },
+                "required": ["curso", "tipo_ingresso"]
+            }
+        }
+    },
+]
+
+
+def execute_tool(tool_name, args, conv_id=None):
+    """Executa uma ferramenta e retorna o resultado como string."""
+    if tool_name == 'agente_precos':
+        results = supabase_rag.buscar_precos(args['query'])
+        return supabase_rag.format_results(results, max_chars=3000)
+
+    elif tool_name == 'receptivo_informacoes':
+        nivel = args.get('nivel', 'graduacao')
+        if nivel == 'pos':
+            results = supabase_rag.buscar_pos(args['query'])
+        else:
+            results = supabase_rag.buscar_informacoes(args['query'])
+        return supabase_rag.format_results(results, max_chars=4000)
+
+    elif tool_name == 'agente_perguntas':
+        results = supabase_rag.buscar_perguntas(args['query'])
+        return supabase_rag.format_results(results, max_chars=2000)
+
+    elif tool_name == 'distribuir_humano':
+        return json.dumps({"status": "transferido", "motivo": args.get('motivo', '')})
+
+    elif tool_name == 'inscricao':
+        return json.dumps({
+            "status": "inscricao_iniciada",
+            "curso": args['curso'],
+            "tipo_ingresso": args['tipo_ingresso'],
+            "mensagem": f"Inscrição iniciada para {args['curso']} via {args['tipo_ingresso']}"
+        })
+
+    return "Ferramenta não encontrada."
 
 # ===================== FOLLOW-UP & ENCERRAMENTO (defaults, sobrescritos pelo banco) =====================
 
@@ -291,11 +309,11 @@ CLOSE_INACTIVITY_BUTTONS = None
 
 # ===================== SAUDAÇÕES (defaults, sobrescritos pelo banco) =====================
 
-GREETING_RETURNING = "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nNa última vez que conversamos, você estava com algumas dúvidas sobre *{topic}* — espero que tenha conseguido te ajudar naquele momento.\n\nAgora me conta: como posso te ajudar hoje?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇"
-GREETING_RETURNING_NO_TOPIC = "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nNa última vez que conversamos, você estava com algumas dúvidas — espero que tenha conseguido te ajudar naquele momento.\n\nAgora me conta: como posso te ajudar hoje?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇"
-GREETING_NEW = "Olá, *{fname}*! Bem-vindo(a) ao Suporte da *Cruzeiro do Sul* 😊\n\nComo posso te ajudar?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇"
-GREETING_ANONYMOUS = "Olá! Bem-vindo ao Suporte ao Aluno da *Cruzeiro do Sul* 😊\n\nComo posso te ajudar?\n\nEscolha uma opção abaixo para agilizar seu atendimento 👇"
-GREETING_BUTTONS = ['Acesso Portal/App', 'Financeiro', 'Aulas e Conteúdo', 'Documentos', 'Rematrícula', 'Falar com atendente']
+GREETING_RETURNING = "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nComo posso te ajudar hoje?"
+GREETING_RETURNING_NO_TOPIC = "Olá, *{fname}*! Que bom falar com você novamente 😊\n\nComo posso te ajudar hoje?"
+GREETING_NEW = "Olá, *{fname}*! Bem-vindo(a) 😊\n\nComo posso te ajudar?"
+GREETING_ANONYMOUS = "Olá! Bem-vindo(a) 😊\n\nComo posso te ajudar?"
+GREETING_BUTTONS = ['Falar com atendente']
 
 
 def load_agent_config_from_db():
@@ -703,7 +721,7 @@ def generate_conversation_summary(messages):
     if not messages or len(messages) < 2:
         return "Interação curta, sem resumo detalhado."
 
-    conv_text = '\n'.join([f"{'Aluno' if m['role']=='user' else 'IA'}: {m['text'][:150]}" for m in messages[-8:]])
+    conv_text = '\n'.join([f"{'Usuario' if m['role']=='user' else 'IA'}: {m['text'][:150]}" for m in messages[-8:]])
 
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
@@ -711,7 +729,7 @@ def generate_conversation_summary(messages):
             model='gpt-4o-mini',
             messages=[{
                 'role': 'user',
-                'content': f"Resuma esta conversa de suporte em 1-2 frases curtas (max 100 palavras). Foque no problema e se foi resolvido:\n\n{conv_text}"
+                'content': f"Resuma esta conversa em 1-2 frases curtas (max 100 palavras). Foque no assunto e se foi resolvido:\n\n{conv_text}"
             }],
             max_tokens=80, temperature=0.1
         )
@@ -728,7 +746,7 @@ def tabulate_interaction(messages, profile, phone):
     if not messages or len(messages) < 2:
         return
 
-    conv_text = '\n'.join([f"{'Aluno' if m['role']=='user' else 'IA'}: {m['text'][:150]}" for m in messages[-10:]])
+    conv_text = '\n'.join([f"{'Usuario' if m['role']=='user' else 'IA'}: {m['text'][:150]}" for m in messages[-10:]])
 
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
@@ -737,7 +755,7 @@ def tabulate_interaction(messages, profile, phone):
             messages=[{
                 'role': 'user',
                 'content': f"""Classifique este atendimento. Responda EXATAMENTE neste formato JSON:
-{{"tema":"ACESSO_PORTAL|FINANCEIRO|ACADEMICO|MATRICULA|DOCUMENTOS|OUTRO","subtema":"descricao curta","sentimento":"satisfeito|neutro|frustrado|irritado","resolvido":"sim|nao|parcial|escalado","nps":7}}
+{{"tema":"OUTRO","subtema":"descricao curta","sentimento":"satisfeito|neutro|frustrado|irritado","resolvido":"sim|nao|parcial|escalado","nps":7}}
 
 Conversa:
 {conv_text}"""
@@ -838,23 +856,20 @@ def flag_detractor(lead_id, student_name, tabulation, phone):
 
 def build_student_context(profile):
     if not profile:
-        return "## ALUNO: Não identificado"
-    parts = [f"## DADOS DO ALUNO:"]
+        return ""
+    parts = [f"## DADOS DO CONTATO:"]
     parts.append(f"- Nome: {profile['name']}")
-    if profile.get('cpf'):
-        parts.append(f"- CPF: ***.***.{profile['cpf'][-5:-2]}-** (parcial por segurança)")
     if profile.get('tags'):
         parts.append(f"- Tags: {', '.join(profile['tags'])}")
     if profile.get('email'):
         parts.append(f"- Email: {profile['email']}")
-    parts.append(f"\nChame o aluno de *{profile.get('first_name', 'aluno')}*.")
     return '\n'.join(parts)
 
 
 def build_memory_context(memory):
     if not memory:
-        return "## MEMÓRIA: Primeiro contato deste aluno."
-    parts = ["## MEMÓRIA DO ALUNO:"]
+        return ""
+    parts = ["## MEMÓRIA DO CONTATO:"]
     parts.append(f"- Interações anteriores: {memory['interaction_count']}")
     if memory.get('last_topic'):
         parts.append(f"- Último assunto: {memory['last_topic']}")
@@ -862,110 +877,21 @@ def build_memory_context(memory):
         parts.append(f"- Resumo da última conversa: {memory['last_summary']}")
     if memory.get('last_contact_at'):
         parts.append(f"- Último contato: {memory['last_contact_at']}")
-    if memory.get('sentiment_history'):
-        parts.append(f"- Sentimento anterior: {memory['sentiment_history']}")
-
-    if memory['interaction_count'] > 3:
-        parts.append("\nEste aluno é RECORRENTE. Seja eficiente e direto. Reconheça que já se conhecem.")
-    elif memory['interaction_count'] > 0 and memory.get('last_summary'):
-        parts.append(f"\nNa última conversa: {memory['last_summary'][:200]}. Se relevante, pergunte se resolveu.")
     return '\n'.join(parts)
 
 
 def build_sentiment_context(sentiment, memory):
     if sentiment == 'frustrado':
-        return "## SENTIMENTO DETECTADO: FRUSTRADO\n- VALIDE o sentimento: 'Entendo sua frustração...'\n- Priorize resolução rápida ou escalação imediata\n- NÃO minimize o problema"
+        return "## SENTIMENTO DETECTADO: FRUSTRADO"
     elif sentiment == 'preocupado':
-        return "## SENTIMENTO DETECTADO: PREOCUPADO\n- Demonstre compreensão: 'Vamos resolver isso...'\n- Seja atencioso e detalhado nas instruções"
+        return "## SENTIMENTO DETECTADO: PREOCUPADO"
     return ""
 
 
-# ===================== RAG + LLM =====================
-
-def rag_search(question):
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    conn = get_db()
-    cur = conn.cursor()
-
-    t0 = time.time()
-    emb = client.embeddings.create(
-        input=question[:2000], model='text-embedding-3-small', dimensions=256
-    ).data[0].embedding
-    t_emb = time.time() - t0
-
-    emb_str = ','.join(str(x) for x in emb)
-    t0 = time.time()
-    cur.execute(f"""
-        SELECT * FROM (
-            SELECT pergunta_aluno, resposta_atendente, tema, whatsapp_buttons, media_attachments,
-                   cosine_similarity(embedding, ARRAY[{emb_str}]::float8[]) as score
-            FROM knowledge_base WHERE embedding IS NOT NULL
-        ) sub ORDER BY score DESC LIMIT {TOP_K_RESULTS}
-    """)
-    results = cur.fetchall()
-    t_rag = time.time() - t0
-
-    if results:
-        p(f"    Embedding: {t_emb*1000:.0f}ms | RAG: {t_rag*1000:.0f}ms | Top: {results[0][5]:.3f}")
-
-    cur.close()
-    conn.close()
-    return results, emb
-
-
-def find_media_for_topic(topic_query):
-    """Busca mídias anexas na knowledge_base via embedding similarity."""
-    try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        conn = get_db()
-        cur = conn.cursor()
-        emb = client.embeddings.create(
-            input=topic_query[:500], model='text-embedding-3-small', dimensions=256
-        ).data[0].embedding
-        emb_str = ','.join(str(x) for x in emb)
-        cur.execute(f"""
-            SELECT media_attachments, cosine_similarity(embedding, ARRAY[{emb_str}]::float8[]) as score
-            FROM knowledge_base
-            WHERE embedding IS NOT NULL AND media_attachments IS NOT NULL AND media_attachments != ''
-            ORDER BY score DESC LIMIT 1
-        """)
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row and row[1] >= 0.65:
-            items = json.loads(row[0])
-            if isinstance(items, list) and items:
-                p(f"    Media match para '{topic_query[:40]}' (sim={row[1]:.3f}): {len(items)} item(s)")
-                return items
-    except Exception as e:
-        p(f"    Erro find_media_for_topic: {e}")
-    return []
-
-
-def send_topic_media(conv_id, topic_query):
-    """Busca e envia mídias relacionadas a um tópico de submenu."""
-    media_items = find_media_for_topic(topic_query)
-    for mi in media_items:
-        time.sleep(1)
-        send_media_message(conv_id, mi)
-        p(f"    Midia submenu enviada: {mi.get('filename', mi.get('url', ''))}")
-
-
-def build_references(results):
-    refs = ''
-    for i, (pergunta, resposta, tema, wa_buttons, media_att, score) in enumerate(results):
-        if score < 0.6:
-            continue
-        refs += f"\n--- Ref {i+1} (tema: {tema or 'N/A'}, sim: {score:.2f}) ---\n"
-        refs += f"Pergunta: {pergunta[:500]}\nResposta: {resposta[:1500]}\n"
-    return refs or "\nNenhuma referencia encontrada.\n"
-
+# ===================== TOOL-CALLING LLM =====================
 
 def get_active_alerts(mode_filter='context'):
-    """Busca alertas ativos do banco.
-    mode_filter: 'context' retorna alertas com display_mode in ('context','both')
-                 'greeting' retorna alertas com display_mode in ('greeting','both')
-    """
+    """Busca alertas ativos do banco."""
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
@@ -988,18 +914,16 @@ def get_active_alerts(mode_filter='context'):
 
 
 def build_alerts_for_llm():
-    """Formata alertas ativos para injeção no system prompt."""
     rows = get_active_alerts('context')
     if not rows:
         return ""
-    alerts_text = "## ⚠️ ALERTAS ATIVOS (use SOMENTE estes ao mencionar status de sistemas):\n"
+    alerts_text = "## ALERTAS ATIVOS:\n"
     for title, message, category in rows:
-        alerts_text += f"- **[{category}] {title}**: {message}\n"
+        alerts_text += f"- [{category}] {title}: {message}\n"
     return alerts_text
 
 
 def build_greeting_alerts():
-    """Retorna texto de alertas para anexar à saudação, ou string vazia."""
     rows = get_active_alerts('greeting')
     if not rows:
         return ""
@@ -1009,7 +933,8 @@ def build_greeting_alerts():
     return "\n\n" + "\n".join(lines)
 
 
-def call_llm(question, references, history, profile, memory, sentiment, is_first):
+def call_llm_with_tools(question, history, profile, memory, sentiment, conv_id, is_first=False):
+    """Chamada ao LLM com tool-calling (orquestrador N8N)."""
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     student_ctx = build_student_context(profile)
@@ -1017,38 +942,73 @@ def call_llm(question, references, history, profile, memory, sentiment, is_first
     sentiment_ctx = build_sentiment_context(sentiment, memory)
     alerts_ctx = build_alerts_for_llm()
 
-    prompt = SYSTEM_PROMPT.format(
+    system = SYSTEM_PROMPT.format(
         student_context=student_ctx,
         memory_context=memory_ctx,
         sentiment_context=sentiment_ctx,
         active_alerts=alerts_ctx,
-        references=references,
         history=history
     )
 
     if is_first:
-        prompt += "\n(Primeira mensagem do aluno nesta conversa.)\n"
-    else:
-        prompt += "\n(Já em conversa - NÃO cumprimente, vá direto ao ponto.)\n"
+        system += "\n(Primeira mensagem do lead nesta conversa.)\n"
 
-    t0 = time.time()
-    chat = client.chat.completions.create(
-        model='gpt-4o-mini',
-        messages=[
-            {'role': 'system', 'content': prompt},
-            {'role': 'user', 'content': question}
-        ],
-        max_tokens=800, temperature=0.3
-    )
-    resp_text = chat.choices[0].message.content
-    t_llm = time.time() - t0
-    p(f"    LLM: {t_llm*1000:.0f}ms")
+    messages = [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': question}
+    ]
 
-    cm = re.search(r'\[CONFIANCA:(\d+\.?\d*)\]', resp_text)
-    confidence = float(cm.group(1)) if cm else 0.3
-    clean = re.sub(r'\[CONFIANCA:\d+\.?\d*\]', '', resp_text).strip()
+    action_result = None
+    total_time = 0
 
-    return clean, confidence, t_llm
+    for iteration in range(6):
+        t0 = time.time()
+        resp = client.chat.completions.create(
+            model='gpt-4.1-mini',
+            messages=messages,
+            tools=TOOLS,
+            tool_choice='auto',
+            max_tokens=1200,
+            temperature=0.4,
+            top_p=0.9,
+        )
+        t_iter = time.time() - t0
+        total_time += t_iter
+
+        choice = resp.choices[0]
+
+        if choice.finish_reason == 'tool_calls':
+            messages.append(choice.message)
+            for tc in choice.message.tool_calls:
+                fn_name = tc.function.name
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                p(f"    🔧 Tool[{iteration+1}]: {fn_name}({json.dumps(args, ensure_ascii=False)[:80]})")
+
+                result = execute_tool(fn_name, args, conv_id)
+
+                if fn_name == 'distribuir_humano':
+                    action_result = {'action': 'transfer', 'motivo': args.get('motivo', '')}
+                elif fn_name == 'inscricao':
+                    action_result = {
+                        'action': 'inscricao',
+                        'curso': args.get('curso', ''),
+                        'tipo_ingresso': args.get('tipo_ingresso', 'Vestibular Múltipla Escolha')
+                    }
+
+                messages.append({
+                    'role': 'tool',
+                    'tool_call_id': tc.id,
+                    'content': result
+                })
+        else:
+            text = (choice.message.content or '').strip()
+            p(f"    LLM final: {total_time*1000:.0f}ms | iterations={iteration+1}")
+            return text, action_result, total_time
+
+    return "Desculpe, tive um problema ao processar sua mensagem. Pode tentar novamente?", None, total_time
 
 
 # ===================== SEND / LOG =====================
@@ -1422,21 +1382,13 @@ def get_conversation_messages_api(conv_id, limit=15):
 
 
 BOT_RESPONSE_FINGERPRINTS = [
-    'Essa é uma dúvida que precisa de um atendente',
     'Vou te transferir para um atendente',
-    'Bem-vindo(a) ao Suporte',
-    'Bem-vindo ao Suporte',
     'Como posso te ajudar?',
     'Que bom que pude ajudar',
     'Obrigado pelo contato',
     'Entendi sua situação',
     '[CONFIANCA:',
-    'Selecione uma das opções',
-    'Acesso ao Portal / App Duda',
-    'Selecione para dar andamento',
-    'não encontrei uma resposta exata',
     'Não entendi',
-    'Posso te ajudar de outra forma',
 ]
 
 
@@ -1768,13 +1720,7 @@ def handle_message(conv_id, msg_id, msg_body, is_button_click=False):
             waiting_for_client = True; inactivity_start = time.time()
             return
 
-        TOPIC_LABELS = {
-            'acesso': 'acesso ao portal',
-            'financeiro': 'questões financeiras',
-            'academico': 'aulas e conteúdo',
-            'matricula': 'matrícula',
-            'documentos': 'documentos',
-        }
+        TOPIC_LABELS = {}
 
         if student_profile and student_profile.get('first_name'):
             fname = student_profile['first_name']
@@ -1891,124 +1837,37 @@ def handle_message(conv_id, msg_id, msg_body, is_button_click=False):
         p(f"  [ESCALADO] Follow-ups desativados (atendente humano assume)")
         return
 
-    # === STRIP EMOJIS + ASTERISCOS ===
-    stripped = q_lower.replace('*', '')
-    for e in '🔑💰📚📄🔄👤🧾💳🤝💸🆕📱🖥️📅📖📝📋📎💲🏷️📈🔒💠⚠️📧🌐📨📊⏰':
-        stripped = stripped.replace(e + ' ', '').replace(e, '')
-    stripped = stripped.strip()
-
-    # Função auxiliar: match depende se é botão ou texto digitado
-    def _matches(key, text):
-        if is_button_click:
-            return key in text
-        return text == key
-
-    # === 0) BOTÃO COM RESPOSTA DIRETA ===
-    for direct_key, direct_text in SUBMENU_DIRECT_RESPONSE.items():
-        if _matches(direct_key, stripped):
-            p(f"  Button click -> resposta direta: '{direct_key}'")
-            meta_typing_on()
-            send_and_track(conv_id, direct_text, buttons=['Voltar ao menu', 'Falar com atendente'])
-            conversation_messages.append({'role': 'bot', 'text': direct_text})
-            log_to_db(conv_id, question, direct_text, 1.0, 'direct_response')
-            send_topic_media(conv_id, direct_key)
-            waiting_for_client = True; inactivity_start = time.time()
-            return
-
-    # === 1) BOTÃO ESPECÍFICO -> RAG ===
-    search_query = question
-    is_specific_click = False
-    for sub_key, real_question in SUBMENU_TO_QUESTION.items():
-        if _matches(sub_key, stripped):
-            search_query = real_question
-            is_specific_click = True
-            p(f"  Button click -> RAG: '{real_question[:50]}'")
-            break
-
-    if not is_specific_click:
-        # === 2) SUBMENU L2 -> L3 ===
-        for l3_key, l3_data in SUBMENU_L3.items():
-            if _matches(l3_key, stripped):
-                p(f"  Submenu L2 -> L3: {l3_key}")
-                meta_typing_on()
-                send_and_track(conv_id, l3_data['text'], buttons=l3_data['buttons'])
-                conversation_messages.append({'role': 'bot', 'text': l3_data['text']})
-                log_to_db(conv_id, question, l3_data['text'], 1.0, 'submenu_l3')
-                waiting_for_client = True; inactivity_start = time.time()
-                return
-
-        # === 3) MAIN MENU -> SUBMENU L2 ===
-        for menu_key, submenu_key in MAIN_MENU_KEYS.items():
-            if _matches(menu_key, stripped):
-                sub = SUBMENU[submenu_key]
-                p(f"  Menu -> submenu L2: {submenu_key}")
-                meta_typing_on()
-                send_and_track(conv_id, sub['text'], buttons=sub['buttons'])
-                conversation_messages.append({'role': 'bot', 'text': sub['text']})
-                log_to_db(conv_id, question, sub['text'], 1.0, 'submenu')
-                waiting_for_client = True; inactivity_start = time.time()
-                return
-
-    # === FALLBACK: mensagem muito curta ===
-    if len(stripped) <= 3 and search_query == question:
-        p(f"  Msg muito curta sem match, mostrando menu")
-        msg = "Não entendi 🤔 Selecione uma opção:"
-        meta_typing_on()
-        send_and_track(conv_id, msg, buttons=MAIN_MENU_BUTTONS)
-        conversation_messages.append({'role': 'bot', 'text': msg})
-        log_to_db(conv_id, question, msg, 0.0, 'fallback_short')
-        return
-
-    # === PIPELINE RAG ===
-    p(f"  Pipeline RAG... (sentimento: {sentiment})")
-    results, emb = rag_search(search_query)
-    top_score = results[0][5] if results else 0
-
-    if top_score < 0.65:
-        msg = "Hmm, não encontrei uma resposta exata para isso. Posso te ajudar de outra forma?"
-        meta_typing_on()
-        send_and_track(conv_id, msg, buttons=['Tentar de novo', 'Falar com atendente', 'Ver opções'])
-        conversation_messages.append({'role': 'bot', 'text': msg})
-        log_to_db(conv_id, question, msg, top_score, 'escalate_low_sim')
-        waiting_for_client = True; inactivity_start = time.time()
-        return
-
-    references = build_references(results)
+    # === PIPELINE TOOL-CALLING (Orquestrador) ===
+    p(f"  Pipeline Tool-Calling... (sentimento: {sentiment})")
     history = build_conversation_history(conv_id)
-    clean, confidence, llm_time = call_llm(question, references, history, student_profile, memory, sentiment, is_first)
 
-    p(f"  Resultado: conf={confidence:.2f} | top_sim={top_score:.3f}")
+    meta_typing_on()
+    clean, action_result, llm_time = call_llm_with_tools(
+        question, history, student_profile, memory, sentiment, conv_id, is_first
+    )
+
     p(f"  Resposta: {clean[:200]}...")
 
-    # Botões baseados no score RAG (não na auto-avaliação do LLM)
-    if top_score >= 0.80:
-        followup_buttons = FOLLOWUP_HIGH_BUTTONS
-    else:
-        followup_buttons = FOLLOWUP_MED_BUTTONS
+    if action_result and action_result.get('action') == 'transfer':
+        p(f"  [TOOL] distribuir_humano: {action_result.get('motivo', '')}")
+        if clean:
+            send_and_track(conv_id, clean)
+        transfer_to_human(conv_id, action_result.get('motivo', 'Solicitação via orquestrador'))
+        conversation_messages.append({'role': 'bot', 'text': clean or ESCALATION_MSG})
+        log_to_db(conv_id, question, clean or ESCALATION_MSG, 1.0, 'tool_transfer')
+        summary = generate_conversation_summary(conversation_messages)
+        save_memory(PHONE_TO_MONITOR, student_profile, 'escalacao', summary, sentiment)
+        tabulate_interaction(conversation_messages, student_profile, PHONE_TO_MONITOR)
+        waiting_for_client = False; inactivity_start = 0
+        return
 
-    # Enviar mídias ANTES do texto (com caption)
-    if results and results[0][4]:
-        try:
-            media_list = json.loads(results[0][4])
-            if isinstance(media_list, list):
-                for idx, mi in enumerate(media_list):
-                    caption = mi.get('caption', '')
-                    if not caption:
-                        mtype = mi.get('type', 'document').lower()
-                        if mtype == 'video':
-                            caption = 'Assista o tutorial:'
-                        elif mtype == 'image':
-                            caption = 'Veja a imagem:'
-                        else:
-                            caption = 'Confira o documento:'
-                    if idx > 0:
-                        time.sleep(0.5)
-                    send_media_message(conv_id, mi, caption=caption)
-                    p(f"    Midia enviada: {mi.get('filename', mi.get('url', ''))}")
-        except Exception as e:
-            p(f"    Erro ao enviar midias: {e}")
+    if action_result and action_result.get('action') == 'inscricao':
+        curso = action_result.get('curso', '')
+        tipo = action_result.get('tipo_ingresso', '')
+        p(f"  [TOOL] inscricao: {curso} / {tipo}")
 
-    # Dividir resposta em blocos para enviar como mensagens separadas no WhatsApp
+    followup_buttons = FOLLOWUP_HIGH_BUTTONS
+
     chunks = [c.strip() for c in clean.split('\n\n') if c.strip()]
     if len(chunks) <= 1:
         status = send_and_track(conv_id, clean, buttons=followup_buttons)
@@ -2021,28 +1880,13 @@ def handle_message(conv_id, msg_id, msg_body, is_button_click=False):
             p(f"  ENVIADO {i+1}/{len(chunks)} (status {status})")
 
     conversation_messages.append({'role': 'bot', 'text': clean})
-    log_to_db(conv_id, question, clean, confidence, 'auto_reply')
+    log_to_db(conv_id, question, clean, 0.8, 'tool_reply')
 
     waiting_for_client = True; inactivity_start = time.time()
 
 
 def detect_topic_from_messages(messages):
     """Simple topic detection from conversation messages."""
-    all_text = ' '.join([m['text'] for m in messages]).lower()
-    topics = {
-        'acesso': ['portal', 'login', 'senha', 'acesso', 'app', 'duda'],
-        'financeiro': ['mensalidade', 'pagamento', 'boleto', 'financeiro'],
-        'academico': ['aula', 'disciplina', 'nota', 'atividade', 'prova'],
-        'matricula': ['matrícula', 'rematrícula', 'matricular'],
-        'documentos': ['declaração', 'documento', 'certificado'],
-    }
-    scores = {}
-    for topic, keywords in topics.items():
-        scores[topic] = sum(1 for kw in keywords if kw in all_text)
-    if scores:
-        best = max(scores, key=scores.get)
-        if scores[best] > 0:
-            return best
     return 'outro'
 
 
@@ -2087,7 +1931,7 @@ def main():
 
     p("")
     p("=" * 60)
-    p("  AGENTE IA v4 - Identificacao + Memoria + Empatia + Tab")
+    p("  AGENTE IA v4")
     p(f"  Monitorando: {PHONE_TO_MONITOR}")
     p(f"  Polling: {POLL_INTERVAL}s | Threshold: {CONFIDENCE_THRESHOLD}")
     p(f"  Follow-up: {FOLLOWUP_1_DELAY}s / Close: {CLOSE_DELAY}s")
