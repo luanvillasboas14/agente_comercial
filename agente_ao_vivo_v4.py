@@ -503,7 +503,7 @@ def maybe_reload():
         if restart_val and restart_val != _last_restart_flag:
             if _last_restart_flag:
                 print(f"[{time.strftime('%H:%M:%S')}]   RESTART solicitado via Cockpit — reiniciando...", flush=True)
-                lock_path = 'c:/Distribuicao_Academico/agent.lock'
+                lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agent.lock')
                 try:
                     os.remove(lock_path)
                 except OSError:
@@ -580,7 +580,7 @@ def first_name(full_name):
 # ===================== FASE 1: IDENTIFICAÇÃO =====================
 
 def identify_student(phone):
-    """Busca dados do aluno na DataCrazy CRM pelo telefone."""
+    """Busca dados do lead no DataCrazy CRM pelo telefone."""
     try:
         search_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
         r = requests.get(f'{DCZ_CRM}/leads', headers=H,
@@ -592,7 +592,7 @@ def identify_student(phone):
         data = r.json()
         leads = data.get('data', [])
         if not leads:
-            p(f"    Aluno nao encontrado no CRM")
+            p(f"    Lead nao encontrado no CRM")
             return None
 
         lead = leads[0]
@@ -608,7 +608,7 @@ def identify_student(phone):
             'metrics': lead.get('metrics', {}),
             'created_at': lead.get('createdAt', ''),
         }
-        p(f"    ALUNO: {profile['name']} | CPF: {profile['cpf'][:6]}*** | Tags: {profile['tags']}")
+        p(f"    LEAD: {profile['name']} | CPF: {profile['cpf'][:6]}*** | Tags: {profile['tags']}")
         return profile
 
     except Exception as e:
@@ -659,11 +659,11 @@ def ensure_memory_tables():
     conn.commit()
     cur.close()
     conn.close()
-    p("  Tabelas student_memory + interaction_summary OK")
+    p("  Tabelas lead_memory + interaction_summary OK")
 
 
 def load_memory(phone):
-    """Carrega memória do aluno pelo telefone."""
+    """Carrega memória do lead pelo telefone."""
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -681,7 +681,7 @@ def load_memory(phone):
 
 
 def save_memory(phone, profile, topic, summary, sentiment):
-    """Salva/atualiza memória do aluno."""
+    """Salva/atualiza memória do lead."""
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -736,7 +736,7 @@ def generate_conversation_summary(messages):
         return resp.choices[0].message.content.strip()
     except Exception as e:
         p(f"    Erro resumo: {e}")
-        return "Conversa de suporte ao aluno."
+        return "Conversa de suporte ao lead."
 
 
 # ===================== FASE 4: TABULAÇÃO =====================
@@ -826,7 +826,7 @@ def flag_detractor(lead_id, student_name, tabulation, phone):
 
         note = (
             f"⚠️ [DETRATOR - {datetime.now().strftime('%d/%m %H:%M')}]\n"
-            f"Aluno: {student_name} ({phone})\n"
+            f"Lead: {student_name} ({phone})\n"
             f"Sentimento: {sentimento} | NPS: {nps}\n"
             f"Tema: {tema}/{subtema}\n"
             f"Requer atenção imediata do time."
@@ -835,7 +835,7 @@ def flag_detractor(lead_id, student_name, tabulation, phone):
             f'{DCZ_CRM}/leads/{lead_id}',
             headers=H, json={'notes': note}, timeout=10
         )
-        p(f"    ⚠️  DETRATOR SINALIZADO no CRM: {student_name} (NPS={nps}, {sentimento})")
+        p(f"    ⚠️  DETRATOR SINALIZADO no CRM: {student_name} (NPS={nps}, {sentimento})")  # student_name = nome do lead
 
         try:
             requests.patch(
@@ -1073,7 +1073,7 @@ def send_media_message(conv_id, media_item, caption=''):
     local_path = None
 
     if is_local:
-        local_path = os.path.join('c:/Distribuicao_Academico/media', os.path.basename(url))
+        local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'media', os.path.basename(url))
         if not os.path.exists(local_path):
             p(f"    Arquivo local nao encontrado: {local_path}")
             return 404
@@ -1459,7 +1459,7 @@ def build_conversation_history(conv_id):
         msgs = get_conversation_messages_api(conv_id, limit=10)
     history = []
     for m in reversed(msgs):
-        sender = "Aluno" if m.get('received', False) else "Assistente"
+        sender = "Lead" if m.get('received', False) else "Assistente"
         body = m.get('body', '')[:200]
         if body:
             history.append(f"{sender}: {body}")
@@ -1479,15 +1479,15 @@ def is_escalation_trigger(question):
 # ===================== DEBUG COMMANDS =====================
 
 def _simulate_redistribution(conv_id):
-    """Simulação ao vivo: gera resumo da conversa, busca atendente, avisa aluno."""
+    """Simulação ao vivo: gera resumo da conversa, busca atendente, avisa lead."""
     from supabase_client import get_best_available_agent
     from redistribution_engine import generate_handoff_summary, format_internal_note
 
     agent_name = 'Marcelo Pinheiro'
-    student_name = student_profile.get('name', 'Aluno') if student_profile else 'Aluno'
+    student_name = student_profile.get('name', 'Lead') if student_profile else 'Lead'
 
     p(f"  [REDIST] Atendente simulado: {agent_name}")
-    p(f"  [REDIST] Aluno: {student_name}")
+    p(f"  [REDIST] Lead: {student_name}")
     p(f"  [REDIST] Msgs na conversa: {len(conversation_messages)}")
 
     msgs_for_summary = [
@@ -1605,7 +1605,7 @@ def handle_debug_command(conv_id, cmd):
             "📊 *Status do Agente*",
             f"• Phone: ...{PHONE_TO_MONITOR[-4:]}",
             f"• Default: ...{PHONE_TO_MONITOR_DEFAULT[-4:]}",
-            f"• Aluno: {student_profile.get('name', '?') if student_profile else 'N/A'}",
+            f"• Lead: {student_profile.get('name', '?') if student_profile else 'N/A'}",
             f"• Conv ID: {conv_id[:16]}...",
             f"• Msgs processadas: {len(processed_msg_ids)}",
             f"• Msgs na conversa: {len(conversation_messages)}",
@@ -1695,7 +1695,7 @@ def handle_message(conv_id, msg_id, msg_body, is_button_click=False):
     q_lower = question.lower().strip().rstrip('!?.,').strip()
 
     if student_profile is None:
-        p(f"  Identificando aluno...")
+        p(f"  Identificando lead...")
         student_profile = identify_student(PHONE_TO_MONITOR)
 
     memory = load_memory(PHONE_TO_MONITOR)
@@ -1798,7 +1798,7 @@ def handle_message(conv_id, msg_id, msg_body, is_button_click=False):
         send_and_track(conv_id, ESCALATION_MSG)
         conversation_messages.append({'role': 'bot', 'text': ESCALATION_MSG})
         log_to_db(conv_id, question, ESCALATION_MSG, 1.0, 'escalate_request')
-        transfer_to_human(conv_id, f'Solicitação explícita do aluno: "{question[:80]}"')
+        transfer_to_human(conv_id, f'Solicitação explícita do lead: "{question[:80]}"')
 
         summary = generate_conversation_summary(conversation_messages)
         save_memory(PHONE_TO_MONITOR, student_profile, 'escalacao', summary, sentiment)
@@ -1918,7 +1918,7 @@ def _init_phone(phone):
 
     p(f"  Conversas: {len(convs)} | Msgs conhecidas: {len(processed_msg_ids)}")
     if student_profile:
-        p(f"  Aluno: {student_profile['name']} | Tags: {student_profile['tags']}")
+        p(f"  Lead: {student_profile['name']} | Tags: {student_profile['tags']}")
     if memory:
         p(f"  Memoria: {memory['interaction_count']} interacoes | Ultimo: {memory.get('last_topic', 'N/A')}")
 

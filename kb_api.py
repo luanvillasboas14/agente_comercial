@@ -121,11 +121,10 @@ DCZ_MSG = 'https://messaging.g1.datacrazy.io/api'
 DCZ_TOKEN = os.environ.get('DCZ_TOKEN', '')
 
 TEMAS = [
-    'ACESSO_PORTAL', 'ACESSO_APP', 'MATRICULA', 'FINANCEIRO_MENSALIDADE',
-    'FINANCEIRO_BOLETO', 'FINANCEIRO_REEMBOLSO', 'ACADEMICO_NOTAS',
-    'ACADEMICO_DISCIPLINAS', 'ACADEMICO_ESTAGIO', 'ACADEMICO_TCC',
-    'CERTIFICADO_DIPLOMA', 'AULAS_PRESENCIAIS', 'CANCELAMENTO',
-    'TRANSFERENCIA', 'COMERCIAL', 'OUTRO'
+    'CURSOS', 'PRECOS', 'INSCRICAO', 'MATRICULA',
+    'FINANCEIRO', 'BOLSAS', 'VESTIBULAR', 'ENEM',
+    'POLOS', 'DOCUMENTOS', 'POS_GRADUACAO',
+    'COMERCIAL', 'FAQ', 'OUTRO'
 ]
 
 MODEL_PRICING = {
@@ -134,7 +133,7 @@ MODEL_PRICING = {
     'gpt-3.5-turbo':{'input': 0.50, 'output': 1.50},
 }
 
-DEFAULT_PROMPT = """Você é um orquestrador inteligente de atendimento educacional da Cruzeiro do Sul Virtual.
+DEFAULT_PROMPT = """Você é um orquestrador inteligente de atendimento comercial educacional.
 Sua função é analisar mensagens e responder de forma profissional, acolhedora e direta, com foco em conversão.
 
 NUNCA invente informações. Só use dados retornados pelas buscas.
@@ -867,7 +866,7 @@ async def test_question(data: TestRequest):
                 history_text += f"{role}: {h.get('text', '')[:200]}\n"
 
         # Build student/memory/sentiment context
-        student_ctx = "## ALUNO: Modo simulador (sem telefone)"
+        student_ctx = "## LEAD: Modo simulador (sem telefone)"
         memory_ctx = ""
         sentiment_ctx = ""
         student_info = None
@@ -894,7 +893,7 @@ async def test_question(data: TestRequest):
                 cur.execute("SELECT * FROM student_memory WHERE phone LIKE %s", (f'%{clean_phone[-11:]}%',))
                 mem = cur.fetchone()
             if mem:
-                memory_ctx = f"## MEMÓRIA DO ALUNO:\n- Interações: {mem['interaction_count']}\n- Último assunto: {mem.get('last_topic','')}\n- Resumo anterior: {mem.get('last_summary','')}"
+                memory_ctx = f"## MEMÓRIA DO LEAD:\n- Interações: {mem['interaction_count']}\n- Último assunto: {mem.get('last_topic','')}\n- Resumo anterior: {mem.get('last_summary','')}"
 
         # Sentiment detection
         frustration_words = ['não consigo', 'nao consigo', 'impossível', 'absurdo', 'problema', 'erro',
@@ -1360,7 +1359,7 @@ DCZ_CRM = 'https://crm.g1.datacrazy.io/api/crm'
 
 @app.get("/api/student/{phone}")
 async def get_student(phone: str):
-    """Busca dados do aluno no DataCrazy CRM + memória local."""
+    """Busca dados do lead no DataCrazy CRM + memória local."""
     h = {'Authorization': f'Bearer {DCZ_TOKEN}', 'Content-Type': 'application/json'}
     clean_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
 
@@ -1451,7 +1450,7 @@ async def tabulation_stats():
 
 @app.get("/api/memory/list")
 async def list_memories(page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=50)):
-    """Lista memórias de alunos."""
+    """Lista memórias de leads."""
     offset = (page - 1) * per_page
     with get_db() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1517,6 +1516,17 @@ async def bulk_delete_qa(data: BulkDeleteRequest):
         deleted = cur.rowcount
         conn.commit()
     return {'deleted': deleted}
+
+
+@app.post("/api/qa/clear-all")
+async def clear_all_qa():
+    """Remove TODOS os Q&A da knowledge_base."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM knowledge_base")
+        deleted = cur.rowcount
+        conn.commit()
+    return {'deleted': deleted, 'message': f'{deleted} registros removidos'}
 
 
 @app.post("/api/qa/bulk-update-tema")
@@ -1779,7 +1789,7 @@ async def sentiment_dashboard(
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 SUPABASE_HEADERS = {'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
-SUPABASE_TABLE = 'distribuicao_academico_duplicate'
+SUPABASE_TABLE = 'distribuicao_comercial'
 
 
 def supabase_get(endpoint, params=None):
@@ -1836,7 +1846,7 @@ async def agents_status():
     return {'agents': result, 'server_time': now}
 
 
-# ===================== BLOCO D: ALUNOS =====================
+# ===================== BLOCO D: LEADS =====================
 
 @app.delete("/api/memory/{phone}")
 async def delete_memory(phone: str):

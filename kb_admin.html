@@ -113,7 +113,7 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
   <div class="tab" data-tab="tabulation" onclick="sw('tabulation')"><i class="fas fa-chart-bar mr-1.5"></i>Tabulação</div>
   <div class="tab" data-tab="sentiment" onclick="sw('sentiment')"><i class="fas fa-heart-pulse mr-1.5"></i>Sentimento</div>
   <div class="tab" data-tab="team" onclick="sw('team')"><i class="fas fa-users-gear mr-1.5"></i>Equipe</div>
-  <div class="tab" data-tab="students" onclick="sw('students')"><i class="fas fa-user-graduate mr-1.5"></i>Alunos</div>
+  <div class="tab" data-tab="students" onclick="sw('students')"><i class="fas fa-user-tie mr-1.5"></i>Leads</div>
   <div class="tab" data-tab="logs" onclick="sw('logs')"><i class="fas fa-timeline mr-1.5"></i>Interações</div>
   <div class="tab" data-tab="alerts" onclick="sw('alerts')"><i class="fas fa-triangle-exclamation mr-1.5"></i>Alertas</div>
   <div class="tab" data-tab="menus" onclick="sw('menus')"><i class="fas fa-bars-staggered mr-1.5"></i>Menus</div>
@@ -177,16 +177,16 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
   <div class="card flex-1 flex flex-col overflow-hidden">
     <div class="wa-header">
       <div class="w-9 h-9 rounded-full bg-white bg-opacity-20 flex items-center justify-center"><i class="fab fa-whatsapp text-white"></i></div>
-      <div class="flex-1"><div class="font-semibold text-sm">Simulador WhatsApp</div><div class="text-xs text-green-200">Fale como aluno para testar o agente</div></div>
+      <div class="flex-1"><div class="font-semibold text-sm">Simulador WhatsApp</div><div class="text-xs text-green-200">Fale como lead para testar o agente</div></div>
       <select id="chat-model" class="inp" style="width:auto;font-size:11px;padding:5px 8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);max-width:160px;"></select>
       <select id="chat-prompt" class="inp" style="width:auto;font-size:11px;padding:5px 8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);max-width:180px;"></select>
       <button onclick="clearChat()" class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.2);"><i class="fas fa-broom"></i></button>
     </div>
     <div id="chat-msgs" class="flex-1 overflow-y-auto p-4 space-y-2.5 wa-bg">
-      <div class="flex justify-center"><span class="bg-white text-xs text-gray-500 px-4 py-1.5 rounded-full shadow-sm">Envie uma mensagem como aluno</span></div>
+      <div class="flex justify-center"><span class="bg-white text-xs text-gray-500 px-4 py-1.5 rounded-full shadow-sm">Envie uma mensagem como lead</span></div>
     </div>
     <div class="p-3 bg-gray-50 border-t flex gap-2 items-center">
-      <input type="text" id="chat-in" class="inp flex-1" style="border-radius:24px;padding:10px 16px;" placeholder="Digite como aluno..." onkeydown="if(event.key==='Enter'){event.preventDefault();sendChat();}">
+      <input type="text" id="chat-in" class="inp flex-1" style="border-radius:24px;padding:10px 16px;" placeholder="Digite como lead..." onkeydown="if(event.key==='Enter'){event.preventDefault();sendChat();}">
       <button onclick="sendChat()" class="btn btn-p" style="border-radius:50%;width:40px;height:40px;padding:0;" id="btn-cs"><i class="fas fa-paper-plane" style="margin-left:2px;"></i></button>
     </div>
   </div>
@@ -212,7 +212,7 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
       <div><label class="text-xs font-medium text-gray-500">Temperatura: <span id="pg-t-val" class="text-indigo-600 font-bold">0.2</span></label><input type="range" id="pg-temp" min="0" max="1" step="0.1" value="0.2" class="w-full mt-1 accent-indigo-600" oninput="document.getElementById('pg-t-val').textContent=this.value"></div>
       <div><label class="text-xs font-medium text-gray-500">Max tokens: <span id="pg-m-val" class="text-indigo-600 font-bold">400</span></label><input type="range" id="pg-max" min="100" max="1000" step="50" value="400" class="w-full mt-1 accent-indigo-600" oninput="document.getElementById('pg-m-val').textContent=this.value"></div>
     </div>
-    <label class="text-xs font-medium text-gray-500 mb-1 block">Pergunta do aluno</label>
+    <label class="text-xs font-medium text-gray-500 mb-1 block">Pergunta</label>
     <textarea id="pg-q" class="inp mb-3" rows="2" placeholder="Ex: Como acesso meu portal?"></textarea>
     <div class="flex gap-2">
       <button onclick="pgRun('a')" class="btn btn-p flex-1" id="btn-pg-a"><i class="fas fa-play"></i> Testar A</button>
@@ -326,7 +326,7 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
 </div>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
   <div class="card p-5">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3"><i class="fas fa-users mr-1"></i>Top Alunos (mais interações)</h3>
+    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3"><i class="fas fa-users mr-1"></i>Top Leads (mais interações)</h3>
     <div id="tab-students" class="space-y-2"></div>
   </div>
   <div class="card p-5">
@@ -460,11 +460,11 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
         <div class="space-y-3">
           <div>
             <label class="text-xs font-medium text-gray-500">Título</label>
-            <input type="text" id="alert-title" class="inp mt-1" placeholder="Ex: Instabilidade no Portal do Aluno">
+            <input type="text" id="alert-title" class="inp mt-1" placeholder="Ex: Ex: Promoção especial de matrícula">
           </div>
           <div>
             <label class="text-xs font-medium text-gray-500">Mensagem para o agente</label>
-            <textarea id="alert-message" class="inp mt-1" rows="5" style="resize:vertical;min-height:100px" placeholder="Descreva o problema/evento com detalhes. O agente usará este texto para informar os alunos."></textarea>
+            <textarea id="alert-message" class="inp mt-1" rows="5" style="resize:vertical;min-height:100px" placeholder="Descreva o evento com detalhes. O agente usará este texto para informar os leads."></textarea>
           </div>
           <div>
             <label class="text-xs font-medium text-gray-500">Quando exibir</label>
@@ -473,7 +473,7 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
               <option value="greeting">Apenas na saudação (greeting)</option>
               <option value="both">Saudação + contexto da resposta</option>
             </select>
-            <p class="text-xs text-gray-400 mt-1" id="alert-display-hint">O agente menciona quando relevante à pergunta do aluno</p>
+            <p class="text-xs text-gray-400 mt-1" id="alert-display-hint">O agente menciona quando relevante à pergunta do lead</p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -583,17 +583,17 @@ select.inp{cursor:pointer;-webkit-appearance:none;background-image:url("data:ima
       <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3"><i class="fas fa-hand-wave text-blue-400 mr-1.5"></i>Mensagens de Saudação</h3>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
         <div class="card p-5">
-          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-blue-500"></span><h4 class="text-sm font-semibold text-gray-700">Aluno Retornando (com tópico)</h4></div>
+          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-blue-500"></span><h4 class="text-sm font-semibold text-gray-700">Lead Retornando (com tópico)</h4></div>
           <label class="text-xs font-medium text-gray-500">Texto <span class="text-gray-300">({fname}=nome, {topic}=último tema)</span></label>
           <textarea id="cfg-greet-ret" class="inp mt-1" rows="6" style="resize:vertical;min-height:120px"></textarea>
         </div>
         <div class="card p-5">
-          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-blue-400"></span><h4 class="text-sm font-semibold text-gray-700">Aluno Retornando (sem tópico)</h4></div>
+          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-blue-400"></span><h4 class="text-sm font-semibold text-gray-700">Lead Retornando (sem tópico)</h4></div>
           <label class="text-xs font-medium text-gray-500">Texto <span class="text-gray-300">({fname}=nome)</span></label>
           <textarea id="cfg-greet-ret-nt" class="inp mt-1" rows="6" style="resize:vertical;min-height:120px"></textarea>
         </div>
         <div class="card p-5">
-          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-teal-500"></span><h4 class="text-sm font-semibold text-gray-700">Aluno Novo</h4></div>
+          <div class="flex items-center gap-2 mb-3"><span class="w-2 h-2 rounded-full bg-teal-500"></span><h4 class="text-sm font-semibold text-gray-700">Novo Lead</h4></div>
           <label class="text-xs font-medium text-gray-500">Texto <span class="text-gray-300">({fname}=nome)</span></label>
           <textarea id="cfg-greet-new" class="inp mt-1" rows="6" style="resize:vertical;min-height:120px"></textarea>
         </div>
@@ -803,12 +803,12 @@ Pode encerrar</textarea>
   <div class="flex-1 overflow-y-auto p-5 space-y-4">
     <input type="hidden" id="edit-id">
     <div>
-      <label class="text-xs font-semibold text-gray-600 mb-1.5 block">Pergunta do Aluno</label>
-      <textarea id="f-q" class="inp" rows="2" placeholder="Ex: Como acessar a área do aluno?"></textarea>
+      <label class="text-xs font-semibold text-gray-600 mb-1.5 block">Pergunta</label>
+      <textarea id="f-q" class="inp" rows="2" placeholder="Ex: Ex: Qual o valor do curso de Direito?"></textarea>
     </div>
     <div>
       <label class="text-xs font-semibold text-gray-600 mb-1.5 block">Resposta (texto)</label>
-      <textarea id="f-r" class="inp" rows="4" placeholder="Resposta que o aluno receberá..."></textarea>
+      <textarea id="f-r" class="inp" rows="4" placeholder="Resposta que o lead receberá..."></textarea>
     </div>
     <div class="grid grid-cols-2 gap-3">
       <div><label class="text-xs font-semibold text-gray-600 mb-1.5 block">Tema</label><select id="f-t" class="inp"></select></div>
@@ -1083,7 +1083,7 @@ function addMediaUrl(){
 
 // ==== CHAT ====
 function initChat(){loadModelsInto('chat-model');loadPromptsInto('chat-prompt');}
-function clearChat(){chatH=[];chatR={};chatN=0;document.getElementById('chat-msgs').innerHTML='<div class="flex justify-center"><span class="bg-white text-xs text-gray-500 px-4 py-1.5 rounded-full shadow-sm">Envie uma mensagem como aluno</span></div>';document.getElementById('chat-side').innerHTML='<div class="text-sm text-gray-400 text-center mt-10"><i class="fas fa-arrow-left mr-1"></i>Clique em uma resposta da IA</div>';}
+function clearChat(){chatH=[];chatR={};chatN=0;document.getElementById('chat-msgs').innerHTML='<div class="flex justify-center"><span class="bg-white text-xs text-gray-500 px-4 py-1.5 rounded-full shadow-sm">Envie uma mensagem como lead</span></div>';document.getElementById('chat-side').innerHTML='<div class="text-sm text-gray-400 text-center mt-10"><i class="fas fa-arrow-left mr-1"></i>Clique em uma resposta da IA</div>';}
 
 function renderWABubble(text,waData){
   let h=`<div style="white-space:pre-wrap;">${esc(text)}</div>`;
@@ -1272,10 +1272,10 @@ async function loadTabulation(){
     }
 
     const stds=d.top_students||[];
-    document.getElementById('tab-students').innerHTML=stds.length?stds.map(s=>`<div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"><div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">${(s.name||'?')[0]}</div><div class="flex-1 min-w-0"><div class="text-sm font-medium trunc">${esc(s.name||'Sem nome')}</div><div class="text-xs text-gray-400">${s.phone||''}</div></div><div class="text-right"><div class="text-sm font-bold">${s.count}</div><div class="text-xs text-gray-400">NPS ${s.avg_nps}</div></div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum aluno tabulado</div>';
+    document.getElementById('tab-students').innerHTML=stds.length?stds.map(s=>`<div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"><div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">${(s.name||'?')[0]}</div><div class="flex-1 min-w-0"><div class="text-sm font-medium trunc">${esc(s.name||'Sem nome')}</div><div class="text-xs text-gray-400">${s.phone||''}</div></div><div class="text-right"><div class="text-sm font-bold">${s.count}</div><div class="text-xs text-gray-400">NPS ${s.avg_nps}</div></div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum lead tabulado</div>';
 
     const rec=d.recent||[];
-    document.getElementById('tab-recent').innerHTML=rec.length?rec.map(r=>`<div class="p-3 bg-gray-50 rounded-lg border"><div class="flex items-center gap-2 mb-1.5"><span class="badge ${r.resolvido==='sim'?'b-green':r.resolvido==='nao'?'b-red':'b-yellow'}">${r.resolvido||'?'}</span><span class="badge b-blue">${r.tema||'N/A'}</span><span class="badge ${r.sentimento==='frustrado'||r.sentimento==='irritado'?'b-red':r.sentimento==='satisfeito'?'b-green':'b-gray'}">${r.sentimento||'?'}</span><span class="text-xs text-gray-400 ml-auto">${r.created_at?new Date(r.created_at).toLocaleString('pt-BR'):''}</span></div><div class="text-sm text-gray-700">${esc(r.student_name||'Aluno')} - <span class="text-gray-500">${esc(r.subtema||'')}</span></div><div class="text-xs text-gray-400 mt-1 trunc2">${esc(r.resumo||'')}</div><div class="flex items-center gap-2 mt-1"><span class="text-xs text-gray-500">NPS: <strong>${r.nps_implicito||'-'}</strong></span><span class="text-xs text-gray-400">${r.mensagens_count||0} msgs</span></div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum atendimento tabulado</div>';
+    document.getElementById('tab-recent').innerHTML=rec.length?rec.map(r=>`<div class="p-3 bg-gray-50 rounded-lg border"><div class="flex items-center gap-2 mb-1.5"><span class="badge ${r.resolvido==='sim'?'b-green':r.resolvido==='nao'?'b-red':'b-yellow'}">${r.resolvido||'?'}</span><span class="badge b-blue">${r.tema||'N/A'}</span><span class="badge ${r.sentimento==='frustrado'||r.sentimento==='irritado'?'b-red':r.sentimento==='satisfeito'?'b-green':'b-gray'}">${r.sentimento||'?'}</span><span class="text-xs text-gray-400 ml-auto">${r.created_at?new Date(r.created_at).toLocaleString('pt-BR'):''}</span></div><div class="text-sm text-gray-700">${esc(r.student_name||'Lead')} - <span class="text-gray-500">${esc(r.subtema||'')}</span></div><div class="text-xs text-gray-400 mt-1 trunc2">${esc(r.resumo||'')}</div><div class="flex items-center gap-2 mt-1"><span class="text-xs text-gray-500">NPS: <strong>${r.nps_implicito||'-'}</strong></span><span class="text-xs text-gray-400">${r.mensagens_count||0} msgs</span></div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum atendimento tabulado</div>';
   }catch(e){console.error('Erro loadTabulation',e);}
 }
 
@@ -1359,7 +1359,7 @@ async function loadSentiment(){
     document.getElementById('sent-repeat').innerHTML=rep.length?rep.map(r=>`<div class="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-100"><div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold text-sm">${(r.name||'?')[0]}</div><div class="flex-1 min-w-0"><div class="text-sm font-medium">${esc(r.name||'Sem nome')}</div><div class="text-xs text-gray-400">${r.phone||''}</div></div><div class="text-right"><div class="text-sm font-bold text-red-600">${r.count}x</div><div class="text-xs text-gray-400">NPS ${r.avg_nps}</div></div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum detrator recorrente</div>';
 
     const alerts=d.recent_alerts||[];
-    document.getElementById('sent-alerts').innerHTML=alerts.length?alerts.map(a=>`<div class="p-3 bg-amber-50 rounded-lg border border-amber-100"><div class="flex items-center gap-2 mb-1"><span class="badge b-red">${a.sentimento||'?'}</span><span class="badge b-yellow">NPS ${a.nps_implicito||'-'}</span><span class="text-xs text-gray-400 ml-auto">${a.created_at?new Date(a.created_at).toLocaleString('pt-BR'):''}</span></div><div class="text-sm">${esc(a.student_name||'Aluno')} - ${esc(a.tema||'')}</div><div class="text-xs text-gray-500 mt-1 trunc2">${esc(a.resumo||'')}</div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum alerta</div>';
+    document.getElementById('sent-alerts').innerHTML=alerts.length?alerts.map(a=>`<div class="p-3 bg-amber-50 rounded-lg border border-amber-100"><div class="flex items-center gap-2 mb-1"><span class="badge b-red">${a.sentimento||'?'}</span><span class="badge b-yellow">NPS ${a.nps_implicito||'-'}</span><span class="text-xs text-gray-400 ml-auto">${a.created_at?new Date(a.created_at).toLocaleString('pt-BR'):''}</span></div><div class="text-sm">${esc(a.student_name||'Lead')} - ${esc(a.tema||'')}</div><div class="text-xs text-gray-500 mt-1 trunc2">${esc(a.resumo||'')}</div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhum alerta</div>';
   }catch(e){console.error('Erro loadSentiment',e);}
 }
 
@@ -1395,9 +1395,9 @@ async function searchStudents(){
   renderStudents({items:d.items,total:d.items.length,page:1,pages:1});
 }
 function renderStudents(d){
-  document.getElementById('stu-cnt').textContent=d.total+' alunos';
+  document.getElementById('stu-cnt').textContent=d.total+' leads';
   document.getElementById('stu-cnt2').textContent=d.total+' total';
-  document.getElementById('stu-list').innerHTML=(d.items||[]).length?d.items.map(s=>`<div class="p-4 hover:bg-gray-50 cursor-pointer flex gap-3 border-b transition-colors" onclick="showStudent('${s.phone}')"><div class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm shrink-0">${(s.student_name||'?')[0]}</div><div class="flex-1 min-w-0"><div class="text-sm font-medium trunc">${esc(s.student_name||'Sem nome')}</div><div class="text-xs text-gray-400">${s.phone||''}</div></div><div class="text-right shrink-0"><div class="text-xs text-gray-500">${s.interaction_count||0} interações</div><div class="text-xs text-gray-400">${s.last_contact_at?new Date(s.last_contact_at).toLocaleDateString('pt-BR'):'-'}</div></div></div>`).join(''):'<div class="p-10 text-center text-gray-400"><i class="fas fa-user-graduate text-3xl mb-2"></i><div>Nenhum aluno na memória</div></div>';
+  document.getElementById('stu-list').innerHTML=(d.items||[]).length?d.items.map(s=>`<div class="p-4 hover:bg-gray-50 cursor-pointer flex gap-3 border-b transition-colors" onclick="showStudent('${s.phone}')"><div class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm shrink-0">${(s.student_name||'?')[0]}</div><div class="flex-1 min-w-0"><div class="text-sm font-medium trunc">${esc(s.student_name||'Sem nome')}</div><div class="text-xs text-gray-400">${s.phone||''}</div></div><div class="text-right shrink-0"><div class="text-xs text-gray-500">${s.interaction_count||0} interações</div><div class="text-xs text-gray-400">${s.last_contact_at?new Date(s.last_contact_at).toLocaleDateString('pt-BR'):'-'}</div></div></div>`).join(''):'<div class="p-10 text-center text-gray-400"><i class="fas fa-user-tie text-3xl mb-2"></i><div>Nenhum lead na memória</div></div>';
   if(d.pages>1)paginate('stu-pag',d.page,d.pages,p=>{stuPg=p;loadStudents();});
   else document.getElementById('stu-pag').innerHTML='';
 }
@@ -1419,7 +1419,7 @@ async function showStudent(phone){
   document.getElementById('stu-last').textContent=s.last_contact_at?new Date(s.last_contact_at).toLocaleDateString('pt-BR'):'-';
   document.getElementById('stu-history').innerHTML=(hist.items||[]).length?hist.items.map(i=>`<div class="p-3 bg-gray-50 rounded-lg border"><div class="flex items-center gap-2 mb-1"><span class="badge ${i.sentimento==='frustrado'||i.sentimento==='irritado'?'b-red':i.sentimento==='satisfeito'?'b-green':'b-gray'}">${i.sentimento||'?'}</span><span class="badge b-blue">${i.tema||'-'}</span><span class="badge b-yellow">NPS ${i.nps_implicito||'-'}</span><span class="text-xs text-gray-400 ml-auto">${i.created_at?new Date(i.created_at).toLocaleString('pt-BR'):''}</span></div><div class="text-xs text-gray-600 trunc2">${esc(i.resumo||'')}</div></div>`).join(''):'<div class="text-sm text-gray-400 text-center py-4">Nenhuma interação</div>';
 }
-async function clearStudentMemory(){if(!_currentStudentPhone)return;if(!confirm('Limpar memória deste aluno?'))return;
+async function clearStudentMemory(){if(!_currentStudentPhone)return;if(!confirm('Limpar memória deste lead?'))return;
 await fetch(A+'/api/memory/'+encodeURIComponent(_currentStudentPhone),{method:'DELETE'});
 toast('Memória limpa');document.getElementById('stu-detail').classList.add('hidden');loadStudents();}
 
@@ -1560,8 +1560,8 @@ function clearAlertForm() {
 function updateDisplayHint() {
   const mode = document.getElementById('alert-display-mode').value;
   const hints = {
-    context: 'O agente menciona quando relevante à pergunta do aluno',
-    greeting: 'Aparece como aviso na mensagem de boas-vindas de todo aluno',
+    context: 'O agente menciona quando relevante à pergunta do lead',
+    greeting: 'Aparece como aviso na mensagem de boas-vindas de todo lead',
     both: 'Aparece na saudação E fica disponível para respostas'
   };
   document.getElementById('alert-display-hint').textContent = hints[mode] || '';
