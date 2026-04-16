@@ -1,0 +1,72 @@
+# ===== Secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== Logs =====
+*.log
+agent.lock
+
+# ===== Media uploads (large files) =====
+media/
+
+# ===== Large data files =====
+qa_pairs.json
+categorias_relatorio.json
+dcz_leads.json
+dcz_conv.json
+msgs_debug.json
+templates_datacrazy.json
+distribuicao_academico_acolhimento_csv*.json
+ia_atendimento_aluno_workflow.json
+
+# ===== Output files =====
+*_output.txt
+
+# ===== Legacy/test scripts (contain hardcoded credentials) =====
+agente_ao_vivo.py
+agente_ao_vivo_v2.py
+agente_ao_vivo_v3.py
+analise_*.py
+benchmark_*.py
+buscar_*.py
+categorizar_*.py
+check_*.py
+debug_*.py
+descobrir_*.py
+enviar_*.py
+explorar_*.py
+explore_*.py
+extrair_*.py
+gerar_*.py
+importar_*.py
+investigar_*.py
+limpar_*.py
+melhorar_*.py
+monitor_e_responder.py
+normalizar_*.py
+pg_query.py
+redistribution_engine.py
+setup_knowledge_base.py
+simulate_*.py
+supabase_client.py
+test_*.py
+testar_*.py
+teste_*.py
+update_prompt.py
+verify_workflow.py
+_check_kb.py
+
+# ===== IDE =====
+.vscode/
+.idea/
+.cursor/
+
+# ===== OS =====
+Thumbs.db
+.DS_Store
