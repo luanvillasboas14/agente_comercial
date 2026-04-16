@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agente_ao_vivo_v4.py .
 COPY kb_api.py .
 COPY kb_admin.html .
+COPY supabase_rag.py .
 COPY start.sh .
 RUN dos2unix start.sh && chmod +x start.sh
 
