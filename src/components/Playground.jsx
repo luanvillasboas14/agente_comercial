@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Send, Settings, Trash2, Bot, User, AlertCircle, Key, ChevronDown } from 'lucide-react'
 
 const MODELS = ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4.1']
+const DEFAULT_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 
 export default function Playground({ prompts }) {
   const [messages, setMessages] = useState([])
@@ -9,7 +10,7 @@ export default function Playground({ prompts }) {
   const [loading, setLoading] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
 
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('oai_key') || '')
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('oai_key') || DEFAULT_API_KEY)
   const [model, setModel] = useState(() => localStorage.getItem('oai_model') || 'gpt-4o-mini')
 
   const chatRef = useRef(null)
@@ -154,7 +155,7 @@ export default function Playground({ prompts }) {
           </div>
           <div className="pg-config-info">
             Todos os {prompts.length} prompts são enviados juntos como system message.
-            A API Key fica salva no seu navegador.
+            {DEFAULT_API_KEY ? 'API Key configurada via arquivo .env.' : 'A API Key fica salva no seu navegador.'}
           </div>
         </div>
       )}
