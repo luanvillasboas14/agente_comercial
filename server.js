@@ -18,8 +18,8 @@ app.all('/api/supabase/*path', async (req, res) => {
     return res.status(500).json({ error: 'SUPABASE_URL ou SUPABASE_KEY não configurados' })
   }
   try {
-    const targetPath = req.params.path || ''
-    const targetUrl = `${SUPABASE_URL}/${targetPath}`
+    const fullPath = req.originalUrl.replace('/api/supabase/', '')
+    const targetUrl = `${SUPABASE_URL}/${fullPath}`
 
     const headers = {
       'Content-Type': 'application/json',
