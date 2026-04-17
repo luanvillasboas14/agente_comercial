@@ -35,14 +35,18 @@ function supabaseMiddleware(env) {
             const targetPath = req.url || ''
             const targetUrl = `${SUPABASE_URL}${targetPath}`
 
+            const headers = {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+            }
+            const prefer = req.headers['prefer']
+            if (prefer) headers['Prefer'] = prefer
+
             const response = await fetch(targetUrl, {
               method: req.method || 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-              },
-              body: req.method !== 'GET' ? body : undefined,
+              headers,
+              body: ['GET', 'HEAD', 'DELETE'].includes(req.method) ? undefined : body,
             })
 
             const responseBody = await response.text()

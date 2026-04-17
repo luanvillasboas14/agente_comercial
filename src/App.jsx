@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
+import Dashboard from './components/Dashboard'
 import PromptViewer from './components/PromptViewer'
 import Playground from './components/Playground'
+import ExecutionViewer from './components/ExecutionViewer'
 import './App.css'
 
 const STORAGE_KEY = 'prompt_edits'
@@ -79,7 +81,7 @@ export default function App() {
   const [originalPrompts, setOriginalPrompts] = useState([])
   const [edits, setEdits] = useState(loadEdits)
   const [versions, setVersions] = useState(loadVersions)
-  const [page, setPage] = useState('prompts')
+  const [page, setPage] = useState('dashboard')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -155,6 +157,9 @@ export default function App() {
             <p className="error-text">Erro: {error}</p>
           </div>
         )}
+        {!loading && !error && page === 'dashboard' && (
+          <Dashboard />
+        )}
         {!loading && !error && page === 'prompts' && (
           <PromptViewer
             prompts={prompts}
@@ -165,6 +170,9 @@ export default function App() {
         )}
         {!loading && !error && page === 'playground' && (
           <Playground prompts={prompts} />
+        )}
+        {!loading && !error && page === 'executions' && (
+          <ExecutionViewer />
         )}
       </main>
     </>

@@ -1,13 +1,21 @@
 import { useState, useRef, useEffect } from 'react'
 import { Send, Settings, Trash2, Bot, User, AlertCircle, Key, ChevronDown, Database } from 'lucide-react'
 import { TOOL_DEFINITIONS, TOOL_EXECUTORS } from '../lib/supabaseSearch'
+import { generateExecutionId, saveExecution } from '../lib/executionStore'
 
 const MODELS = ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4.1']
 const DEFAULT_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 const MAX_TOOL_ROUNDS = 5
 
+const CHAT_STORAGE_KEY = 'playground_chat'
+
+function loadChat() {
+  try { return JSON.parse(localStorage.getItem(CHAT_STORAGE_KEY)) || [] }
+  catch { return [] }
+}
+
 export default function Playground({ prompts }) {
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(loadChat)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [toolStatus, setToolStatus] = useState('')
@@ -20,20 +28,15 @@ export default function Playground({ prompts }) {
   const inputRef = useRef(null)
 
   useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight
-    }
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [messages, toolStatus])
 
-  const saveKey = (k) => {
-    setApiKey(k)
-    localStorage.setItem('oai_key', k)
-  }
+  useEffect(() => {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages))
+  }, [messages])
 
-  const saveModel = (m) => {
-    setModel(m)
-    localStorage.setItem('oai_model', m)
-  }
+  const saveKey = (k) => { setApiKey(k); localStorage.setItem('oai_key', k) }
+  const saveModel = (m) => { setModel(m); localStorage.setItem('oai_model', m) }
 
   const buildSystemMessage = () => {
     const promptsText = prompts
@@ -59,17 +62,8 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
   async function callOpenAI(apiMessages) {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: apiMessages,
-        tools: TOOL_DEFINITIONS,
-        temperature: 0.7,
-        max_tokens: 2048,
-      }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: apiMessages, tools: TOOL_DEFINITIONS, temperature: 0.7, max_tokens: 2048 }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -78,15 +72,20 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
     return res.json()
   }
 
-  async function executeToolCalls(toolCalls) {
+  async function executeToolCalls(toolCalls, trace) {
     const results = []
     for (const tc of toolCalls) {
       const fn = tc.function
       const executor = TOOL_EXECUTORS[fn.name]
+      const step = { tool: fn.name, args: {}, result: null, error: null, durationMs: 0 }
+
       if (!executor) {
-        results.push({ tool_call_id: tc.id, role: 'tool', content: `Ferramenta "${fn.name}" não disponível neste ambiente de teste.` })
+        step.error = `Ferramenta "${fn.name}" não disponível`
+        trace.push(step)
+        results.push({ tool_call_id: tc.id, role: 'tool', content: step.error })
         continue
       }
+
       const toolLabel = {
         buscar_precos: 'Buscando preços no Supabase',
         buscar_informacoes: 'Buscando informações do curso no Supabase',
@@ -94,18 +93,21 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
         buscar_perguntas: 'Buscando na base de perguntas',
       }
       setToolStatus(toolLabel[fn.name] || `Executando ${fn.name}...`)
+
+      const t0 = Date.now()
       try {
         const args = JSON.parse(fn.arguments)
-        console.log(`[Tool] Chamando ${fn.name}(${JSON.stringify(args)})`)
+        step.args = args
         const result = await executor(args, apiKey)
-        const preview = result ? result.substring(0, 150) : '(vazio)'
-        console.log(`[Tool] ${fn.name} retornou ${result?.length || 0} chars:`, preview)
-        results.push({ tool_call_id: tc.id, role: 'tool', content: result || 'Nenhum resultado encontrado na base.' })
+        step.result = result || 'Nenhum resultado encontrado na base.'
+        step.durationMs = Date.now() - t0
+        results.push({ tool_call_id: tc.id, role: 'tool', content: step.result })
       } catch (e) {
-        const errMsg = `${fn.name}: ${e.message}`
-        console.error(`[Tool] ERRO em ${fn.name}:`, e)
-        results.push({ tool_call_id: tc.id, role: 'tool', content: `Erro ao buscar: ${errMsg}` })
+        step.error = e.message
+        step.durationMs = Date.now() - t0
+        results.push({ tool_call_id: tc.id, role: 'tool', content: `Erro: ${e.message}` })
       }
+      trace.push(step)
     }
     return results
   }
@@ -113,10 +115,22 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
   const handleSend = async () => {
     const text = input.trim()
     if (!text || loading) return
-    if (!apiKey) {
-      setShowConfig(true)
-      return
+    if (!apiKey) { setShowConfig(true); return }
+
+    const execId = generateExecutionId()
+    const execution = {
+      id: execId,
+      timestamp: new Date().toISOString(),
+      userMessage: text,
+      model,
+      steps: [],
+      toolCalls: [],
+      response: null,
+      error: null,
+      totalDurationMs: 0,
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     }
+    const t0 = Date.now()
 
     const userMsg = { role: 'user', content: text }
     const updated = [...messages, userMsg]
@@ -133,15 +147,24 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
     try {
       let round = 0
       while (round < MAX_TOOL_ROUNDS) {
+        execution.steps.push({ type: 'llm_call', round, messagesCount: apiMessages.length })
         const data = await callOpenAI(apiMessages)
         const choice = data.choices?.[0]
         const msg = choice?.message
-
         if (!msg) throw new Error('Sem resposta da API.')
+
+        if (data.usage) {
+          execution.usage.prompt_tokens += data.usage.prompt_tokens || 0
+          execution.usage.completion_tokens += data.usage.completion_tokens || 0
+          execution.usage.total_tokens += data.usage.total_tokens || 0
+        }
 
         if (choice.finish_reason === 'tool_calls' || msg.tool_calls?.length > 0) {
           apiMessages.push(msg)
-          const toolResults = await executeToolCalls(msg.tool_calls)
+          const toolTrace = []
+          const toolResults = await executeToolCalls(msg.tool_calls, toolTrace)
+          execution.toolCalls.push(...toolTrace)
+          execution.steps.push({ type: 'tool_execution', round, tools: toolTrace.map((t) => t.tool) })
           apiMessages.push(...toolResults)
           round++
           continue
@@ -149,18 +172,25 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
 
         setToolStatus('')
         const reply = msg.content || 'Sem resposta.'
-        setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+        execution.response = reply
+        execution.totalDurationMs = Date.now() - t0
+        saveExecution(execution)
+        setMessages((prev) => [...prev, { role: 'assistant', content: reply, execId }])
         return
       }
 
       setToolStatus('')
-      setMessages((prev) => [...prev, { role: 'error', content: 'Limite de buscas atingido. Tente reformular a pergunta.' }])
+      const errMsg = 'Limite de buscas atingido. Tente reformular a pergunta.'
+      execution.error = errMsg
+      execution.totalDurationMs = Date.now() - t0
+      saveExecution(execution)
+      setMessages((prev) => [...prev, { role: 'error', content: errMsg }])
     } catch (e) {
       setToolStatus('')
-      setMessages((prev) => [
-        ...prev,
-        { role: 'error', content: e.message },
-      ])
+      execution.error = e.message
+      execution.totalDurationMs = Date.now() - t0
+      saveExecution(execution)
+      setMessages((prev) => [...prev, { role: 'error', content: e.message }])
     } finally {
       setLoading(false)
       inputRef.current?.focus()
@@ -168,19 +198,22 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
   }
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  const clearChat = () => {
-    setMessages([])
-    inputRef.current?.focus()
+  const clearChat = () => { setMessages([]); localStorage.removeItem(CHAT_STORAGE_KEY); inputRef.current?.focus() }
+
+  const [copyToast, setCopyToast] = useState(false)
+
+  const copyExecId = (id) => {
+    navigator.clipboard?.writeText(id)
+    setCopyToast(true)
+    setTimeout(() => setCopyToast(false), 1500)
   }
 
   return (
     <div className="playground">
+      {copyToast && <div className="copy-toast">Copiado!</div>}
       <div className="playground-header">
         <div className="playground-header-left">
           <h2 className="viewer-title">Teste IA</h2>
@@ -188,43 +221,22 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
           <span className="playground-prompts-badge">{prompts.length} prompts ativos</span>
         </div>
         <div className="playground-actions">
-          <button className="pg-action-btn" onClick={clearChat} title="Limpar chat">
-            <Trash2 size={16} />
-          </button>
-          <button
-            className={`pg-action-btn ${showConfig ? 'active' : ''}`}
-            onClick={() => setShowConfig(!showConfig)}
-            title="Configurações"
-          >
-            <Settings size={16} />
-          </button>
+          <button className="pg-action-btn" onClick={clearChat} title="Limpar chat"><Trash2 size={16} /></button>
+          <button className={`pg-action-btn ${showConfig ? 'active' : ''}`} onClick={() => setShowConfig(!showConfig)} title="Configurações"><Settings size={16} /></button>
         </div>
       </div>
 
       {showConfig && (
         <div className="pg-config">
           <div className="pg-config-field pg-config-field-wide">
-            <label>
-              <Key size={13} />
-              API Key OpenAI
-            </label>
-            <input
-              type="password"
-              placeholder="sk-..."
-              value={apiKey}
-              onChange={(e) => saveKey(e.target.value)}
-            />
+            <label><Key size={13} /> API Key OpenAI</label>
+            <input type="password" placeholder="sk-..." value={apiKey} onChange={(e) => saveKey(e.target.value)} />
           </div>
           <div className="pg-config-field">
-            <label>
-              <Bot size={13} />
-              Modelo
-            </label>
+            <label><Bot size={13} /> Modelo</label>
             <div className="pg-select-wrap">
               <select value={model} onChange={(e) => saveModel(e.target.value)}>
-                {MODELS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+                {MODELS.map((m) => (<option key={m} value={m}>{m}</option>))}
               </select>
               <ChevronDown size={14} className="pg-select-arrow" />
             </div>
@@ -253,9 +265,16 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
               {m.role === 'user' ? <User size={16} /> : m.role === 'error' ? <AlertCircle size={16} /> : <Bot size={16} />}
             </div>
             <div className="pg-msg-content">
-              <span className="pg-msg-role">
-                {m.role === 'user' ? 'Você' : m.role === 'error' ? 'Erro' : 'Assistente'}
-              </span>
+              <div className="pg-msg-header">
+                <span className="pg-msg-role">
+                  {m.role === 'user' ? 'Você' : m.role === 'error' ? 'Erro' : 'Assistente'}
+                </span>
+                {m.execId && (
+                  <button className="pg-exec-id" onClick={() => copyExecId(m.execId)} title="Clique para copiar ID">
+                    {m.execId}
+                  </button>
+                )}
+              </div>
               <div className="pg-msg-text">{m.content}</div>
             </div>
           </div>
@@ -266,14 +285,9 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
             <div className="pg-msg-content">
               <span className="pg-msg-role">Assistente</span>
               {toolStatus ? (
-                <div className="pg-tool-status">
-                  <Database size={14} className="pg-tool-icon" />
-                  <span>{toolStatus}...</span>
-                </div>
+                <div className="pg-tool-status"><Database size={14} className="pg-tool-icon" /><span>{toolStatus}...</span></div>
               ) : (
-                <div className="pg-typing">
-                  <span /><span /><span />
-                </div>
+                <div className="pg-typing"><span /><span /><span /></div>
               )}
             </div>
           </div>
@@ -281,25 +295,9 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
       </div>
 
       <div className="pg-input-area">
-        <textarea
-          ref={inputRef}
-          rows={1}
-          placeholder="Digite sua mensagem..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onInput={(e) => {
-            e.target.style.height = 'auto'
-            e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-          }}
-        />
-        <button
-          className={`pg-send-btn ${input.trim() ? 'ready' : ''}`}
-          onClick={handleSend}
-          disabled={!input.trim() || loading}
-        >
-          <Send size={18} />
-        </button>
+        <textarea ref={inputRef} rows={1} placeholder="Digite sua mensagem..." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+          onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }} />
+        <button className={`pg-send-btn ${input.trim() ? 'ready' : ''}`} onClick={handleSend} disabled={!input.trim() || loading}><Send size={18} /></button>
       </div>
     </div>
   )

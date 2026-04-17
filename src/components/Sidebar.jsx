@@ -1,8 +1,10 @@
-import { Sparkles, FileText, FlaskConical } from 'lucide-react'
+import { Sparkles, FileText, FlaskConical, ListChecks, BarChart3 } from 'lucide-react'
 
 const NAV_ITEMS = [
+  { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'prompts', label: 'Prompts', icon: FileText },
   { id: 'playground', label: 'Teste IA', icon: FlaskConical },
+  { id: 'executions', label: 'Execuções', icon: ListChecks },
 ]
 
 export default function Sidebar({ page, onNavigate }) {
