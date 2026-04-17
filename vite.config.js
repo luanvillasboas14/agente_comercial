@@ -1,22 +1,32 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [
-    react(),
-    supabaseMiddleware(),
-  ],
-  build: { outDir: 'dist' },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+
+  return {
+    plugins: [
+      react(),
+      supabaseMiddleware(env),
+    ],
+    build: { outDir: 'dist' },
+  }
 })
 
-function supabaseMiddleware() {
-  const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-  const SUPABASE_KEY = process.env.VITE_SUPABASE_KEY || process.env.SUPABASE_KEY
+function supabaseMiddleware(env) {
+  const SUPABASE_URL = env.SUPABASE_URL || env.VITE_SUPABASE_URL
+  const SUPABASE_KEY = env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
 
   return {
     name: 'supabase-proxy',
     configureServer(server) {
       server.middlewares.use('/api/supabase', async (req, res) => {
+        if (!SUPABASE_URL || !SUPABASE_KEY) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'SUPABASE_URL ou SUPABASE_KEY não configurados no .env' }))
+          return
+        }
+
         const chunks = []
         req.on('data', (c) => chunks.push(c))
         req.on('end', async () => {
