@@ -22,8 +22,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js ./
-COPY APAGAR.txt ./dist/APAGAR.txt
 COPY --from=build /app/dist ./dist
+COPY APAGAR.txt ./dist/APAGAR.txt
 
 EXPOSE 8000
 

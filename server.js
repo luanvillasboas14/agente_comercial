@@ -13,12 +13,12 @@ app.use(express.json({ limit: '5mb' }))
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_KEY
 
-app.all('/api/supabase/*', async (req, res) => {
+app.all('/api/supabase/*path', async (req, res) => {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return res.status(500).json({ error: 'SUPABASE_URL ou SUPABASE_KEY não configurados' })
   }
   try {
-    const targetPath = req.params[0] || ''
+    const targetPath = req.params.path || ''
     const targetUrl = `${SUPABASE_URL}/${targetPath}`
 
     const headers = {
@@ -45,7 +45,7 @@ app.all('/api/supabase/*', async (req, res) => {
 // ── Static files ──
 
 app.use(express.static(join(__dirname, 'dist')))
-app.get('*', (_req, res) => {
+app.get('*path', (_req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'))
 })
 
