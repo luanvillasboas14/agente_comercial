@@ -886,6 +886,32 @@
   30% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* Tool status indicator */
+
+.pg-tool-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  color: #60a5fa;
+  font-size: 0.82rem;
+  animation: pulse-tool 1.5s ease-in-out infinite;
+}
+
+.pg-tool-icon {
+  animation: spin-tool 2s linear infinite;
+}
+
+@keyframes pulse-tool {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@keyframes spin-tool {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Input area */
 
 .pg-input-area {

@@ -9,9 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.103.3",
+    "lucide-react": "^0.510.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "lucide-react": "^0.510.0"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.4.1",
