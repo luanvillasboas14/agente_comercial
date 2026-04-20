@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   MessageSquare, Zap, DollarSign, AlertTriangle, Clock,
-  TrendingUp, Database, Search, RefreshCw, Calendar
+  TrendingUp, Database, Search, RefreshCw, Calendar, Filter, Tag
 } from 'lucide-react'
 import { getExecutionsByRange } from '../lib/executionStore'
 
@@ -18,6 +18,13 @@ const TOPIC_LABELS = {
   buscar_informacoes: 'Pediu informações do curso',
   buscar_pos: 'Pediu pós-graduação',
   buscar_perguntas: 'Fez uma pergunta (FAQ)',
+}
+
+const TOPIC_COLORS = {
+  'Pediu preço': 'oklch(66% 0.18 268)',
+  'Pediu informações do curso': 'oklch(68% 0.16 215)',
+  'Pediu pós-graduação': 'oklch(72% 0.14 155)',
+  'Fez uma pergunta (FAQ)': 'oklch(78% 0.14 75)',
 }
 
 function calcCost(usage, model) {
@@ -50,38 +57,129 @@ function isInRange(iso, start, end) {
   return d >= new Date(start) && d <= new Date(end + 'T23:59:59.999Z')
 }
 
-function StatCard({ icon: Icon, label, value, sub, color }) {
+/* ── UI Components ── */
+
+function KPI({ label, icon: Icon, value, unit, sub }) {
   return (
-    <div className="dash-card">
-      <div className="dash-card-icon" style={{ color, background: `${color}15` }}>
-        <Icon size={20} />
+    <div className="kpi">
+      <div className="kpi-head">
+        <div className="kpi-label">
+          <Icon size={13} />
+          <span>{label}</span>
+        </div>
       </div>
-      <div className="dash-card-info">
-        <span className="dash-card-value">{value}</span>
-        <span className="dash-card-label">{label}</span>
-        {sub && <span className="dash-card-sub">{sub}</span>}
+      <div className="kpi-value tnum">
+        {value}
+        {unit && <span className="unit">{unit}</span>}
+      </div>
+      {sub && <div className="kpi-sub">{sub}</div>}
+    </div>
+  )
+}
+
+function AreaChart({ data }) {
+  if (data.length === 0) return <div className="empty">Sem dados no período</div>
+  const W = 620, H = 200, padL = 34, padR = 10, padT = 8, padB = 24
+  const max = Math.max(...data.map(d => d.value)) * 1.15 || 1
+  const stepX = data.length > 1 ? (W - padL - padR) / (data.length - 1) : 0
+  const pts = data.map((d, i) => [padL + i * stepX, padT + (H - padT - padB) * (1 - d.value / max)])
+  const line = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0] + ',' + p[1]).join(' ')
+  const area = line + ` L${pts[pts.length - 1][0]},${H - padB} L${padL},${H - padB} Z`
+  const yTicks = [max, max * 0.66, max * 0.33, 0].map(v => Math.round(v))
+
+  return (
+    <div className="chart-wrap">
+      <div className="chart-y-labels">
+        {yTicks.map((v, i) => <span key={i}>{v}</span>)}
+      </div>
+      <svg className="chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="area-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {yTicks.map((v, i) => {
+          const y = padT + ((H - padT - padB) * i) / 3
+          return <line key={'g'+i} x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--line-subtle)" strokeDasharray={i === 3 ? '' : '2 4'} />
+        })}
+        <path d={area} fill="url(#area-grad)" />
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" />
+        {pts.map((p, i) => <circle key={'p'+i} cx={p[0]} cy={p[1]} r="3" fill="var(--bg-2)" stroke="var(--accent)" strokeWidth="2" />)}
+      </svg>
+      <div className="chart-x-labels tnum">
+        {data.map((d, i) => <span key={i}>{d.label}</span>)}
       </div>
     </div>
   )
 }
 
-function BarChart({ data, label }) {
-  const max = Math.max(...data.map((d) => d.value), 1)
+function HBars({ data, total }) {
+  if (data.length === 0) return <div className="empty">Sem dados no período</div>
+  const max = Math.max(...data.map(d => d.value))
+  return (
+    <div className="hbars">
+      {data.map((d, i) => (
+        <div key={i} className="hbar-row">
+          <div className="hbar-label-row">
+            <div className="hbar-name">
+              <span className="hbar-rank tnum">{i + 1}</span>
+              <span>{d.label}</span>
+            </div>
+            <div className="hbar-value tnum">
+              {d.value.toLocaleString('pt-BR')}
+              <span className="hbar-pct">{((d.value / (total || 1)) * 100).toFixed(1)}%</span>
+            </div>
+          </div>
+          <div className="hbar-track">
+            <div className="hbar-fill" style={{ width: `${(d.value / max) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Donut({ data }) {
+  if (data.length === 0) return <div className="empty">Sem dados no período</div>
+  const R = 56, SW = 14, C = 2 * Math.PI * R
+  const total = data.reduce((s, d) => s + d.value, 0)
+  let offset = 0
 
   return (
-    <div className="dash-section">
-      <h3 className="dash-section-title">
-        <TrendingUp size={16} /> {label}
-      </h3>
-      <div className="dash-bar-chart">
+    <div className="donut-wrap">
+      <div style={{ position: 'relative', width: 150, height: 150, flexShrink: 0 }}>
+        <svg width="150" height="150" viewBox="0 0 150 150">
+          <circle cx="75" cy="75" r={R} fill="none" stroke="var(--bg-4)" strokeWidth={SW} />
+          {data.map((d, i) => {
+            const len = (d.value / total) * C
+            const el = (
+              <circle key={i} cx="75" cy="75" r={R} fill="none"
+                stroke={d.color} strokeWidth={SW}
+                strokeDasharray={`${len} ${C - len}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 75 75)" />
+            )
+            offset += len
+            return el
+          })}
+        </svg>
+        <div className="donut-center">
+          <div>
+            <div className="donut-center-val tnum">{total.toLocaleString('pt-BR')}</div>
+            <div className="donut-center-lbl">tópicos</div>
+          </div>
+        </div>
+      </div>
+      <div className="donut-legend">
         {data.map((d, i) => (
-          <div key={i} className="dash-bar-col">
-            <div className="dash-bar-value">{d.value}</div>
-            <div className="dash-bar-track">
-              <div className="dash-bar-fill"
-                style={{ height: `${Math.max((d.value / max) * 100, 2)}%` }} />
-            </div>
-            <div className="dash-bar-label">{d.label}</div>
+          <div key={i} className="legend-row">
+            <span className="legend-dot" style={{ background: d.color }} />
+            <span className="legend-name">{d.label}</span>
+            <span className="legend-val tnum">
+              {d.value.toLocaleString('pt-BR')}
+              <span className="legend-pct">{((d.value / total) * 100).toFixed(0)}%</span>
+            </span>
           </div>
         ))}
       </div>
@@ -89,32 +187,7 @@ function BarChart({ data, label }) {
   )
 }
 
-function HorizontalBars({ data, label, icon: SectionIcon }) {
-  const max = Math.max(...data.map((d) => d.value), 1)
-
-  return (
-    <div className="dash-section">
-      <h3 className="dash-section-title">
-        <SectionIcon size={16} /> {label}
-      </h3>
-      <div className="dash-hbars">
-        {data.map((d, i) => (
-          <div key={i} className="dash-hbar-row">
-            <span className="dash-hbar-name" title={d.label}>{d.label}</span>
-            <div className="dash-hbar-track">
-              <div className="dash-hbar-fill"
-                style={{ width: `${Math.max((d.value / max) * 100, 2)}%` }} />
-            </div>
-            <span className="dash-hbar-value">{d.value}</span>
-          </div>
-        ))}
-        {data.length === 0 && (
-          <div className="dash-no-data">Sem dados no período</div>
-        )}
-      </div>
-    </div>
-  )
-}
+/* ── Main Dashboard ── */
 
 const PRESETS = [
   { label: 'Hoje', days: 0 },
@@ -126,6 +199,7 @@ const PRESETS = [
 export default function Dashboard() {
   const [executions, setExecutions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [activePreset, setActivePreset] = useState(7)
 
   const today = toInputDate(new Date())
   const sevenAgo = toInputDate(new Date(Date.now() - 6 * 86400000))
@@ -147,6 +221,7 @@ export default function Dashboard() {
     if (days > 0) start.setDate(start.getDate() - (days - 1))
     setStartDate(toInputDate(start))
     setEndDate(toInputDate(end))
+    setActivePreset(days)
   }
 
   const stats = useMemo(() => {
@@ -159,7 +234,6 @@ export default function Dashboard() {
       ? Math.round(executions.reduce((sum, e) => sum + (e.totalDurationMs || 0), 0) / executions.length)
       : 0
 
-    // Day chart — use YYYY-MM-DD string keys to avoid timezone issues
     function toLocalDateKey(iso) {
       const d = new Date(iso)
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -199,7 +273,6 @@ export default function Dashboard() {
       chartData.push(...reduced)
     }
 
-    // Tool usage
     const toolCounts = {}
     executions.forEach((e) => {
       (e.toolCalls || []).forEach((tc) => {
@@ -217,7 +290,6 @@ export default function Dashboard() {
       .map(([k, v]) => ({ label: toolLabels[k] || k, value: v }))
       .sort((a, b) => b.value - a.value)
 
-    // Generalized topics: group only by action type (tool name)
     const actionCounts = {}
     executions.forEach((e) => {
       (e.toolCalls || []).forEach((tc) => {
@@ -247,36 +319,47 @@ export default function Dashboard() {
     : `${new Date(startDate).toLocaleDateString('pt-BR')} — ${new Date(endDate).toLocaleDateString('pt-BR')}`
 
   return (
-    <div className="dashboard">
-      <div className="dash-header">
-        <h2 className="viewer-title">Dashboard</h2>
-        <div className="dash-header-right">
-          <button className="pg-action-btn" onClick={fetchData} title="Atualizar">
-            <RefreshCw size={16} />
+    <div>
+      <div className="page-header">
+        <div className="page-title-block">
+          <div className="page-eyebrow">
+            <span>Painel</span>
+            <span className="sep">/</span>
+            <span>Visão geral</span>
+          </div>
+          <h1 className="page-title">Dashboard</h1>
+          <div className="page-subtitle">Acompanhe o desempenho da IA em tempo real.</div>
+        </div>
+        <div className="page-actions">
+          <button className="btn" onClick={fetchData}>
+            <RefreshCw size={14} />
+            <span>Atualizar</span>
           </button>
         </div>
       </div>
 
-      <div className="dash-content">
-        <div className="dash-date-picker">
-          <div className="dash-date-presets">
+      <div className="page">
+        <div className="dash-toolbar">
+          <div className="date-presets">
             {PRESETS.map((p) => (
-              <button key={p.days} className="dash-preset-btn" onClick={() => applyPreset(p.days)}>
+              <button key={p.days} className={activePreset === p.days ? 'active' : ''} onClick={() => applyPreset(p.days)}>
                 {p.label}
               </button>
             ))}
           </div>
-          <div className="dash-date-inputs">
-            <Calendar size={14} />
-            <input type="date" value={startDate} max={endDate}
-              onChange={(e) => setStartDate(e.target.value)} />
-            <span className="dash-date-sep">até</span>
-            <input type="date" value={endDate} min={startDate} max={today}
-              onChange={(e) => setEndDate(e.target.value)} />
+          <div className="date-range">
+            <Calendar size={13} />
+            <input type="date" value={startDate} max={endDate} onChange={(e) => setStartDate(e.target.value)} />
+            <span className="sep">—</span>
+            <input type="date" value={endDate} min={startDate} max={today} onChange={(e) => setEndDate(e.target.value)} />
           </div>
-          <span className="dash-date-summary">
-            {periodLabel} — {stats.messagesCount} mensagens
-          </span>
+          <div className="spacer" />
+          <div className="period-summary">
+            <span>{periodLabel}</span>
+            <span>·</span>
+            <strong className="tnum">{stats.messagesCount}</strong>
+            <span>mensagens</span>
+          </div>
         </div>
 
         {loading ? (
@@ -285,25 +368,52 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            <div className="dash-cards">
-              <StatCard icon={MessageSquare} label="Mensagens" value={stats.messagesCount}
-                color="#3b82f6" />
-              <StatCard icon={Zap} label="Tokens gastos" value={stats.tokens.toLocaleString('pt-BR')}
-                sub={`${((stats.tokens / 1000) || 0).toFixed(1)}k tokens`} color="#8b5cf6" />
-              <StatCard icon={DollarSign} label="Custo estimado" value={formatBRL(stats.cost)}
-                sub="Baseado no modelo usado" color="#10b981" />
-              <StatCard icon={AlertTriangle} label="Erros" value={stats.errorsCount}
-                color={stats.errorsCount > 0 ? '#ef4444' : '#6b7280'} />
-              <StatCard icon={Clock} label="Tempo médio" value={stats.avgTime > 0 ? `${(stats.avgTime / 1000).toFixed(1)}s` : '-'}
-                color="#f59e0b" />
+            <div className="kpi-grid">
+              <KPI icon={MessageSquare} label="Mensagens" value={stats.messagesCount} />
+              <KPI icon={Zap} label="Tokens usados" value={stats.tokens > 1000000 ? (stats.tokens/1000000).toFixed(2) : stats.tokens.toLocaleString('pt-BR')} unit={stats.tokens > 1000000 ? 'M' : ''} sub="Total de tokens consumidos" />
+              <KPI icon={DollarSign} label="Custo estimado" value={formatBRL(stats.cost)} sub="Baseado no modelo usado" />
+              <KPI icon={Clock} label="Tempo médio" value={stats.avgTime > 0 ? (stats.avgTime / 1000).toFixed(1) : '-'} unit={stats.avgTime > 0 ? 's' : ''} />
+              <KPI icon={AlertTriangle} label="Erros" value={stats.errorsCount} sub={stats.messagesCount > 0 ? `${((stats.errorsCount / stats.messagesCount) * 100).toFixed(1)}% do total` : ''} />
             </div>
 
             <div className="dash-grid">
-              <BarChart data={stats.chartData} label="Mensagens por dia" />
-
-              <div className="dash-grid-right">
-                <HorizontalBars data={stats.toolsData} label="Tools mais usadas" icon={Database} />
-                <HorizontalBars data={stats.topicsData} label="Tópicos mais pedidos" icon={Search} />
+              <div className="dash-col">
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <TrendingUp size={14} />
+                      Mensagens por dia
+                    </div>
+                  </div>
+                  <div className="card-body">
+                    <AreaChart data={stats.chartData} />
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <Database size={14} />
+                      Tools mais usadas
+                    </div>
+                    <span className="card-title-sub">{stats.toolsData.reduce((s, d) => s + d.value, 0).toLocaleString('pt-BR')} chamadas</span>
+                  </div>
+                  <div className="card-body">
+                    <HBars data={stats.toolsData} total={stats.toolsData.reduce((s, d) => s + d.value, 0)} />
+                  </div>
+                </div>
+              </div>
+              <div className="dash-col">
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <Tag size={14} />
+                      Tópicos mais pedidos
+                    </div>
+                  </div>
+                  <div className="card-body">
+                    <Donut data={stats.topicsData.map(d => ({ ...d, color: TOPIC_COLORS[d.label] || 'var(--accent)' }))} />
+                  </div>
+                </div>
               </div>
             </div>
           </>

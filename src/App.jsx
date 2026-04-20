@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard'
 import PromptViewer from './components/PromptViewer'
 import Playground from './components/Playground'
 import ExecutionViewer from './components/ExecutionViewer'
+import FeedbackJobViewer from './components/FeedbackJobViewer'
 import './App.css'
 
 const STORAGE_KEY = 'prompt_edits'
@@ -143,38 +144,30 @@ export default function App() {
   }, [versions])
 
   return (
-    <>
+    <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
       <Sidebar page={page} onNavigate={setPage} />
-      <main className="main-content">
-        {loading && (
-          <div className="state-msg">
-            <div className="loader" />
-            <p>Carregando...</p>
-          </div>
-        )}
-        {error && (
-          <div className="state-msg">
-            <p className="error-text">Erro: {error}</p>
-          </div>
-        )}
-        {!loading && !error && page === 'dashboard' && (
-          <Dashboard />
-        )}
-        {!loading && !error && page === 'prompts' && (
-          <PromptViewer
-            prompts={prompts}
-            onSave={handleSavePrompt}
-            getVersions={getVersions}
-            onRestore={handleRestore}
-          />
-        )}
-        {!loading && !error && page === 'playground' && (
-          <Playground prompts={prompts} />
-        )}
-        {!loading && !error && page === 'executions' && (
-          <ExecutionViewer />
-        )}
+      <main className="main">
+        <div className="main-scroll">
+          {loading && (
+            <div className="state-msg">
+              <div className="loader" />
+              <p>Carregando...</p>
+            </div>
+          )}
+          {error && (
+            <div className="state-msg">
+              <p style={{ color: 'var(--danger)' }}>Erro: {error}</p>
+            </div>
+          )}
+          {!loading && !error && page === 'dashboard' && <Dashboard />}
+          {!loading && !error && page === 'prompts' && (
+            <PromptViewer prompts={prompts} onSave={handleSavePrompt} getVersions={getVersions} onRestore={handleRestore} />
+          )}
+          {!loading && !error && page === 'playground' && <Playground prompts={prompts} />}
+          {!loading && !error && page === 'executions' && <ExecutionViewer />}
+          {!loading && !error && page === 'feedback' && <FeedbackJobViewer />}
+        </div>
       </main>
-    </>
+    </div>
   )
 }

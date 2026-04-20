@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -7,38 +8,62 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      supabaseMiddleware(env),
+      supabaseProxyPlugin('/api/supabase', env.SUPABASE_URL || env.VITE_SUPABASE_URL, env.SUPABASE_KEY || env.VITE_SUPABASE_KEY),
+      supabaseProxyPlugin('/api/feedback-supabase', env.SUPABASE_URL_FEEDBACK || env.VITE_SUPABASE_URL_FEEDBACK, env.SUPABASE_KEY_FEEDBACK || env.VITE_SUPABASE_KEY_FEEDBACK),
+      feedbackJobPlugin(env),
     ],
     build: { outDir: 'dist' },
   }
 })
 
-function supabaseMiddleware(env) {
-  const SUPABASE_URL = env.SUPABASE_URL || env.VITE_SUPABASE_URL
-  const SUPABASE_KEY = env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
-
+function feedbackJobPlugin(env) {
   return {
-    name: 'supabase-proxy',
+    name: 'feedback-job',
     configureServer(server) {
-      server.middlewares.use('/api/supabase', async (req, res) => {
-        if (!SUPABASE_URL || !SUPABASE_KEY) {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'SUPABASE_URL ou SUPABASE_KEY não configurados no .env' }))
+      // Liga o scheduler (cron) no dev também, respeitando FEEDBACK_JOB_ENABLED
+      startScheduler(env)
+
+      // Endpoint de status
+      server.middlewares.use('/api/feedback-job/status', async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Use GET' }))
           return
         }
+        try {
+          const status = await getStatus(env)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(status))
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: e.message }))
+        }
+      })
+    },
+  }
+}
 
+function supabaseProxyPlugin(prefix, url, key) {
+  return {
+    name: `supabase-proxy${prefix}`,
+    configureServer(server) {
+      server.middlewares.use(prefix, async (req, res) => {
+        if (!url || !key) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: `Proxy ${prefix} não configurado (.env)` }))
+          return
+        }
         const chunks = []
         req.on('data', (c) => chunks.push(c))
         req.on('end', async () => {
           try {
             const body = Buffer.concat(chunks).toString()
             const targetPath = req.url || ''
-            const targetUrl = `${SUPABASE_URL}${targetPath}`
-
+            const targetUrl = `${url}${targetPath}`
             const headers = {
               'Content-Type': 'application/json',
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
             }
             const prefer = req.headers['prefer']
             if (prefer) headers['Prefer'] = prefer
@@ -48,7 +73,6 @@ function supabaseMiddleware(env) {
               headers,
               body: ['GET', 'HEAD', 'DELETE'].includes(req.method) ? undefined : body,
             })
-
             const responseBody = await response.text()
             res.writeHead(response.status, {
               'Content-Type': 'application/json',
@@ -64,3 +88,4 @@ function supabaseMiddleware(env) {
     },
   }
 }
+

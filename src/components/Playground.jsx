@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Settings, Trash2, Bot, User, AlertCircle, Key, ChevronDown, Database } from 'lucide-react'
+import { Send, Settings, Trash2, Bot, User, AlertCircle, Key, Sparkles, Check, DollarSign, FileText, MessageSquare } from 'lucide-react'
 import { TOOL_DEFINITIONS, TOOL_EXECUTORS } from '../lib/supabaseSearch'
 import { generateExecutionId, saveExecution } from '../lib/executionStore'
 
@@ -213,33 +213,55 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
 
   return (
     <div className="playground">
-      {copyToast && <div className="copy-toast">Copiado!</div>}
-      <div className="playground-header">
-        <div className="playground-header-left">
-          <h2 className="viewer-title">Teste IA</h2>
-          <span className="playground-model-badge">{model}</span>
-          <span className="playground-prompts-badge">{prompts.length} prompts ativos</span>
+      {copyToast && (
+        <div className="toast">
+          <Check size={14} className="toast-check" />
+          ID copiado
         </div>
-        <div className="playground-actions">
-          <button className="pg-action-btn" onClick={clearChat} title="Limpar chat"><Trash2 size={16} /></button>
-          <button className={`pg-action-btn ${showConfig ? 'active' : ''}`} onClick={() => setShowConfig(!showConfig)} title="Configurações"><Settings size={16} /></button>
+      )}
+
+      {/* Header */}
+      <div className="pg-header">
+        <div className="pg-title-group">
+          <h1 className="page-title" style={{ fontSize: 18 }}>Teste IA</h1>
+          <span className="model-pill">
+            <span className="dot" style={{ background: 'var(--success)' }} />
+            {model}
+          </span>
+          <span className="badge accent">
+            <Sparkles size={11} />
+            {prompts.length} prompts ativos
+          </span>
+        </div>
+        <div className="page-actions">
+          <button className="btn btn-ghost" onClick={clearChat}>
+            <Trash2 size={14} />
+            <span>Limpar</span>
+          </button>
+          <button className={`btn-icon${showConfig ? ' active' : ''}`} onClick={() => setShowConfig(!showConfig)}>
+            <Settings size={15} />
+          </button>
         </div>
       </div>
 
+      {/* Config panel */}
       {showConfig && (
         <div className="pg-config">
-          <div className="pg-config-field pg-config-field-wide">
-            <label><Key size={13} /> API Key OpenAI</label>
-            <input type="password" placeholder="sk-..." value={apiKey} onChange={(e) => saveKey(e.target.value)} />
+          <div>
+            <label className="field-label">
+              <Key size={12} />
+              API Key OpenAI
+            </label>
+            <input className="input" type="password" placeholder="sk-..." value={apiKey} onChange={(e) => saveKey(e.target.value)} />
           </div>
-          <div className="pg-config-field">
-            <label><Bot size={13} /> Modelo</label>
-            <div className="pg-select-wrap">
-              <select value={model} onChange={(e) => saveModel(e.target.value)}>
-                {MODELS.map((m) => (<option key={m} value={m}>{m}</option>))}
-              </select>
-              <ChevronDown size={14} className="pg-select-arrow" />
-            </div>
+          <div>
+            <label className="field-label">
+              <Bot size={12} />
+              Modelo
+            </label>
+            <select className="select" value={model} onChange={(e) => saveModel(e.target.value)}>
+              {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
           <div className="pg-config-info">
             Todos os {prompts.length} prompts são enviados juntos como system message.
@@ -249,55 +271,103 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
         </div>
       )}
 
+      {/* Chat */}
       <div className="pg-chat" ref={chatRef}>
         {messages.length === 0 && (
           <div className="pg-empty">
-            <Bot size={40} strokeWidth={1.2} />
-            <p>Envie uma mensagem para testar a IA</p>
-            <span className="pg-empty-prompt">
-              Usando todos os <strong>{prompts.length} prompts</strong> como system message + <strong>4 tools</strong> de busca no Supabase
-            </span>
+            <div className="pg-empty-icon">
+              <Bot size={22} />
+            </div>
+            <h3>Envie uma mensagem para testar a IA</h3>
+            <p>Usa todos os {prompts.length} prompts como system message + 4 tools de busca no Supabase.</p>
+            <div className="pg-empty-suggestions">
+              {[
+                { icon: DollarSign, text: 'Qual o valor do curso de Direito?' },
+                { icon: FileText, text: 'Quais pós-graduações em área de saúde?' },
+                { icon: MessageSquare, text: 'Como funciona a matrícula para 2026?' },
+              ].map((s, i) => (
+                <button key={i} className="suggest-btn" onClick={() => { setInput(s.text); }}>
+                  <s.icon size={14} />
+                  <span>{s.text}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
         {messages.map((m, i) => (
-          <div key={i} className={`pg-msg pg-msg-${m.role}`}>
-            <div className="pg-msg-avatar">
-              {m.role === 'user' ? <User size={16} /> : m.role === 'error' ? <AlertCircle size={16} /> : <Bot size={16} />}
+          <div key={i} className={`msg ${m.role}`}>
+            <div className="msg-avatar">
+              {m.role === 'user' ? <User size={14} /> : m.role === 'error' ? <AlertCircle size={14} /> : <Sparkles size={14} />}
             </div>
-            <div className="pg-msg-content">
-              <div className="pg-msg-header">
-                <span className="pg-msg-role">
+            <div className="msg-content">
+              <div className="msg-meta-row">
+                <span className="msg-role">
                   {m.role === 'user' ? 'Você' : m.role === 'error' ? 'Erro' : 'Assistente'}
                 </span>
                 {m.execId && (
-                  <button className="pg-exec-id" onClick={() => copyExecId(m.execId)} title="Clique para copiar ID">
+                  <button className="exec-pill" onClick={() => copyExecId(m.execId)}>
                     {m.execId}
                   </button>
                 )}
               </div>
-              <div className="pg-msg-text">{m.content}</div>
+              <div className="msg-bubble">{m.content}</div>
             </div>
           </div>
         ))}
+
         {loading && (
-          <div className="pg-msg pg-msg-assistant">
-            <div className="pg-msg-avatar"><Bot size={16} /></div>
-            <div className="pg-msg-content">
-              <span className="pg-msg-role">Assistente</span>
+          <div className="msg assistant">
+            <div className="msg-avatar">
+              <Sparkles size={14} />
+            </div>
+            <div className="msg-content">
+              <div className="msg-meta-row">
+                <span className="msg-role">Assistente</span>
+              </div>
               {toolStatus ? (
-                <div className="pg-tool-status"><Database size={14} className="pg-tool-icon" /><span>{toolStatus}...</span></div>
+                <div className="tool-status">
+                  <span className="pulse" />
+                  <span>{toolStatus}...</span>
+                </div>
               ) : (
-                <div className="pg-typing"><span /><span /><span /></div>
+                <div className="msg-bubble" style={{ padding: 0, background: 'transparent', border: 0 }}>
+                  <div className="typing">
+                    <span /><span /><span />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
       </div>
 
-      <div className="pg-input-area">
-        <textarea ref={inputRef} rows={1} placeholder="Digite sua mensagem..." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
-          onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }} />
-        <button className={`pg-send-btn ${input.trim() ? 'ready' : ''}`} onClick={handleSend} disabled={!input.trim() || loading}><Send size={18} /></button>
+      {/* Input */}
+      <div className="pg-input-wrap">
+        <div className="pg-input-inner">
+          <textarea
+            ref={inputRef}
+            rows={1}
+            placeholder="Pergunte algo à IA..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <button
+            className={`pg-send${input.trim() ? ' ready' : ''}`}
+            onClick={handleSend}
+            disabled={!input.trim() || loading}
+          >
+            <Send size={15} />
+          </button>
+        </div>
+        <div className="pg-input-hint">
+          <kbd>Enter</kbd>
+          <span>enviar</span>
+          <span style={{ opacity: 0.5 }}>·</span>
+          <kbd>Shift + Enter</kbd>
+          <span>quebrar linha</span>
+        </div>
       </div>
     </div>
   )
