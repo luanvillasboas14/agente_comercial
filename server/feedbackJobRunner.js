@@ -1,11 +1,14 @@
 // Runner compartilhado entre server.js (produção) e vite.config.js (dev).
-// Contém:
-//  - Scheduler com node-cron
-//  - Queue de 1 execução pendente (nunca descarta cron disparado)
-//  - Guard em memória contra execuções paralelas no mesmo processo
-//  - Endpoint-ready: getStatus() para alimentar a UI
+// Scheduler baseado em setInterval (mais robusto que node-cron em containers).
+//
+// Regras:
+//  - Verifica a cada minuto se deve disparar
+//  - Dispara no minuto :01 de toda hora (ex: 00:01, 01:01, ...)
+//  - Também dispara imediatamente no startup se o último run com sucesso foi
+//    há mais de 60 minutos (catch-up após deploy/restart).
+//  - Guard contra execuções paralelas no mesmo processo.
+//  - Queue de 1 execução pendente (cron disparado enquanto job rodando).
 
-import cron from 'node-cron'
 import { runFeedbackJob, getFeedbackJobPreview } from './feedbackJob.js'
 
 let jobRunning = false
@@ -13,6 +16,8 @@ let pendingTrigger = false
 let currentRunStartedAt = null
 let schedulerStarted = false
 let scheduledEnv = null
+let lastTriggeredHourKey = null
+let lastHeartbeatMinute = null
 
 export async function runOnce(env, trigger = 'manual') {
   if (jobRunning) {
@@ -37,6 +42,59 @@ export async function runOnce(env, trigger = 'manual') {
   }
 }
 
+// Faz o check de minuto em minuto. Retorna true se disparou.
+function tick() {
+  if (!scheduledEnv) return
+  const now = new Date()
+  const hourKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}`
+  const minute = now.getMinutes()
+
+  // Heartbeat a cada 10 minutos pra ajudar no debug nos logs do Easypanel
+  const minuteKey = `${hourKey}-${minute}`
+  if (minute % 10 === 0 && minuteKey !== lastHeartbeatMinute) {
+    lastHeartbeatMinute = minuteKey
+    console.log(
+      `[FeedbackJob] ♥ heartbeat ${now.toISOString()} | running=${jobRunning} pending=${pendingTrigger}`
+    )
+  }
+
+  // Dispara no minuto :01 de cada hora, 1x por hora
+  if (minute === 1 && hourKey !== lastTriggeredHourKey) {
+    lastTriggeredHourKey = hourKey
+    console.log(`[FeedbackJob] ⏰ tick :01 disparando cron às ${now.toISOString()}`)
+    runOnce(scheduledEnv, 'cron')
+  }
+}
+
+// No startup, verifica se faz muito tempo sem rodar e dispara catch-up.
+async function catchUpOnStartup(env) {
+  try {
+    const preview = await getFeedbackJobPreview(env)
+    const lastRun = preview?.lastRun
+    const lastStart = lastRun?.started_at ? new Date(lastRun.started_at) : null
+    const minutesSinceLastRun = lastStart
+      ? Math.round((Date.now() - lastStart.getTime()) / 60000)
+      : Infinity
+
+    if (minutesSinceLastRun > 60) {
+      console.log(
+        `[FeedbackJob] Último run foi há ${minutesSinceLastRun === Infinity ? 'nunca' : minutesSinceLastRun + 'min'}; ` +
+        `disparando catch-up imediato.`
+      )
+      // Marca o slot dessa hora para não duplicar se o :01 estiver próximo
+      const now = new Date()
+      lastTriggeredHourKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}`
+      runOnce(env, 'startup_catchup')
+    } else {
+      console.log(
+        `[FeedbackJob] Último run foi há ${minutesSinceLastRun}min; aguardando próximo :01.`
+      )
+    }
+  } catch (e) {
+    console.error('[FeedbackJob] catch-up check falhou, seguindo com scheduler normal:', e.message)
+  }
+}
+
 export function startScheduler(env) {
   if (schedulerStarted) {
     console.log('[FeedbackJob] Scheduler já estava ativo; ignorando nova chamada.')
@@ -48,10 +106,18 @@ export function startScheduler(env) {
     return false
   }
   scheduledEnv = env
-  // Minuto 1 de cada hora (ex: 00:01, 01:01, 02:01...)
-  cron.schedule('1 * * * *', () => runOnce(scheduledEnv, 'cron'))
   schedulerStarted = true
-  console.log('[FeedbackJob] Cron agendado: 1 * * * * (toda hora no minuto 1)')
+
+  // Interval de 30s pra não depender de precisão fina
+  setInterval(tick, 30 * 1000)
+  // Primeiro tick rápido pra ver o heartbeat nos logs
+  setTimeout(tick, 2000)
+
+  console.log('[FeedbackJob] Scheduler iniciado (setInterval 30s, dispara no minuto :01 de cada hora)')
+
+  // Catch-up não-bloqueante
+  setImmediate(() => catchUpOnStartup(env))
+
   return true
 }
 
