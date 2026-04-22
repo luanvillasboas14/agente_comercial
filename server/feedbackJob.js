@@ -121,15 +121,33 @@ export async function getFeedbackJobPreview(env) {
 /* ───────────── Step 1: Fetch + Agrupar Atendimentos ───────────── */
 
 async function fetchRecentMessages(sb, sinceIso) {
-  const query = [
-    'select=*',
-    `sent_at=gte.${sinceIso}`,
-    'or=(contact_id.not.is.null,lead_id.not.is.null)',
-    'order=sent_at.asc.nullslast,created_at.asc.nullslast,id.asc',
-    'limit=5000',
-  ].join('&')
+  // Supabase/PostgREST aplica um max-rows (geralmente 1000). Paginamos com
+  // limit+offset até esgotar. Ordenação estável por (sent_at, created_at, id)
+  // garante que não pulamos nem repetimos registros entre páginas.
+  const PAGE_SIZE = 1000
+  const HARD_CAP = 50000 // trava de segurança para não ficar em loop infinito
+  const all = []
+  let offset = 0
 
-  return await sb.select('mensagens_atendimento_comercial', query)
+  while (offset < HARD_CAP) {
+    const query = [
+      'select=*',
+      `sent_at=gte.${sinceIso}`,
+      'or=(contact_id.not.is.null,lead_id.not.is.null)',
+      'order=sent_at.asc.nullslast,created_at.asc.nullslast,id.asc',
+      `limit=${PAGE_SIZE}`,
+      `offset=${offset}`,
+    ].join('&')
+
+    const page = await sb.select('mensagens_atendimento_comercial', query)
+    const rows = Array.isArray(page) ? page : []
+    all.push(...rows)
+
+    if (rows.length < PAGE_SIZE) break
+    offset += PAGE_SIZE
+  }
+
+  return all
 }
 
 // Calcula a janela adaptativa:
