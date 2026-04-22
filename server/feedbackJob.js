@@ -128,6 +128,7 @@ async function fetchRecentMessages(sb, sinceIso) {
   const HARD_CAP = 50000 // trava de segurança para não ficar em loop infinito
   const all = []
   let offset = 0
+  let pageCount = 0
 
   while (offset < HARD_CAP) {
     const query = [
@@ -141,12 +142,17 @@ async function fetchRecentMessages(sb, sinceIso) {
 
     const page = await sb.select('mensagens_atendimento_comercial', query)
     const rows = Array.isArray(page) ? page : []
+    pageCount++
     all.push(...rows)
+    console.log(
+      `[FeedbackJob] fetch page ${pageCount}: offset=${offset} → ${rows.length} rows (total=${all.length})`
+    )
 
     if (rows.length < PAGE_SIZE) break
     offset += PAGE_SIZE
   }
 
+  console.log(`[FeedbackJob] fetch total: ${all.length} mensagens em ${pageCount} página(s)`)
   return all
 }
 
