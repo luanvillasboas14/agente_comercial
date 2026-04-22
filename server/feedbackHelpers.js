@@ -235,3 +235,12 @@ export function generateJobExecutionId() {
   const seq = String(_counter).padStart(3, '0')
   return `FB-${date}-${time}-${seq}`
 }
+
+/** Um ID por hora UTC — evita duas execuções “cron” no mesmo horário (várias réplicas / processos). */
+export function makeCronHourSlotExecId(d = new Date()) {
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  const h = String(d.getUTCHours()).padStart(2, '0')
+  return `FB-HOURUTC-${y}${m}${day}${h}`
+}

@@ -2,12 +2,12 @@
 // Scheduler baseado em setInterval (mais robusto que node-cron em containers).
 //
 // Regras:
-//  - Verifica a cada minuto se deve disparar
-//  - Dispara no minuto :01 de toda hora (ex: 00:01, 01:01, ...)
-//  - Também dispara imediatamente no startup se o último run com sucesso foi
-//    há mais de 60 minutos (catch-up após deploy/restart).
-//  - Guard contra execuções paralelas no mesmo processo.
-//  - Queue de 1 execução pendente (cron disparado enquanto job rodando).
+//  - Verifica a cada 30s; dispara no minuto :01 UTC de toda hora (1× por hora).
+//  - Catch-up no startup: só se FEEDBACK_JOB_STARTUP_CATCHUP=true (default false),
+//    para não duplicar com o cron ao reiniciar.
+//  - Uma execução “cron” por hora UTC no cluster: runFeedbackJob usa id FB-HOURUTC-…
+//    (insert único; outras instâncias ignoram).
+//  - Guard contra execuções paralelas no mesmo processo + fila de 1 pendente.
 
 import { runFeedbackJob, getFeedbackJobPreview } from './feedbackJob.js'
 
@@ -66,8 +66,13 @@ function tick() {
   }
 }
 
-// No startup, verifica se faz muito tempo sem rodar e dispara catch-up.
+// No startup, catch-up opcional (desligado por padrão — evita triplicar com cron + réplicas).
 async function catchUpOnStartup(env) {
+  const allow = String(env.FEEDBACK_JOB_STARTUP_CATCHUP || '').toLowerCase() === 'true'
+  if (!allow) {
+    console.log('[FeedbackJob] Startup catch-up desligado (FEEDBACK_JOB_STARTUP_CATCHUP≠true).')
+    return
+  }
   try {
     const preview = await getFeedbackJobPreview(env)
     const lastRun = preview?.lastRun
@@ -81,7 +86,6 @@ async function catchUpOnStartup(env) {
         `[FeedbackJob] Último run foi há ${minutesSinceLastRun === Infinity ? 'nunca' : minutesSinceLastRun + 'min'}; ` +
         `disparando catch-up imediato.`
       )
-      // Marca o slot dessa hora para não duplicar se o :01 estiver próximo
       const now = new Date()
       lastTriggeredHourKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}`
       runOnce(env, 'startup_catchup')

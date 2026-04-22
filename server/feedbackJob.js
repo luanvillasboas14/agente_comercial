@@ -5,7 +5,11 @@
 //   SUPABASE_URL_FEEDBACK    - URL do Supabase das tabelas de atendimento/feedback
 //   SUPABASE_KEY_FEEDBACK    - secret key (server-side apenas)
 //   OPENAI_API_KEY           - para chamar gpt-4.1-mini
-//   FEEDBACK_JOB_WINDOW_MINUTES (default 90)
+//   FEEDBACK_JOB_WINDOW_MINUTES (default 90) — janela deslizante até “agora”
+//   FEEDBACK_JOB_EXPECTED_INTERVAL_MINUTES (default 60) — intervalo esperado entre runs com sucesso
+//   FEEDBACK_JOB_MAX_LOOKBACK_EXTENSION_MINUTES (default 120) — amplia lookback se run atrasou / faltou
+//   FEEDBACK_JOB_USE_HOUR_SLOT_LOCK (default true) — 1 execução cron/catchup por hora UTC (id FB-HOURUTC-…)
+//   FEEDBACK_JOB_STARTUP_CATCHUP — ver feedbackJobRunner.js (default desligado)
 
 import {
   normalizeConsultor, parseDate, toIso, numericOrNull, average, maxOrNull,
@@ -14,6 +18,7 @@ import {
   getLocalDateKey, exceededFollowupDeadline, hasUrl, detectDecline,
   looksLikeWeakClosingWithoutNextStep, clamp, completenessScoreMessage,
   generateJobExecutionId,
+  makeCronHourSlotExecId,
 } from './feedbackHelpers.js'
 
 const OPENAI_MODEL = 'gpt-4.1-mini'
@@ -73,6 +78,7 @@ export async function getFeedbackJobPreview(env) {
     Number(FEEDBACK_JOB_WINDOW_MINUTES),
     Number(FEEDBACK_JOB_BUFFER_MINUTES),
     Number(FEEDBACK_JOB_MAX_WINDOW_MINUTES) || 0,
+    env,
   )
 
   let pendingCount = null
@@ -158,60 +164,73 @@ async function fetchRecentMessages(sb, sinceIso) {
   return all
 }
 
-/** Lê o "até quando" a última execução buscou mensagens (para avançar a janela e não re-ler tudo). */
-function extractFetchUntilFromRun(row) {
-  if (!row) return null
-  const steps = row.steps
-  if (!Array.isArray(steps)) return row.started_at || null
-  const w = steps.find((s) => s.type === 'window_info')
-  if (w?.until) return w.until
-  // Runs antigos sem campo until: until ≈ instante do fetch (= início do run)
-  return row.started_at || row.finished_at || null
+function isUniqueViolation(err) {
+  const m = String(err?.message || err || '')
+  return m.includes('23505') || m.includes('duplicate key') || /unique constraint/i.test(m)
 }
 
-// Janela adaptativa:
-// - Depois da 1ª execução com metadados: since = (until da execução anterior) − buffer (sobreposição)
-//   → evita refetch massivo das mesmas mensagens a cada hora.
-// - Sem histórico / legado: since = now − defaultWindowMinutes (cold start).
-// - Opcional: FEEDBACK_JOB_MAX_WINDOW_MINUTES limita o tamanho da janela (backlog após muito tempo parado).
-export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinutes, maxWindowMinutes = 0) {
-  const now = new Date()
-  const minSince = new Date(now.getTime() - defaultWindowMinutes * 60 * 1000)
-
-  let lastUntilIso = null
-  let lastStartIso = null
+async function reclaimHourSlotIfPreviousFailed(sb, execId, startedAtIso, trigger) {
   try {
     const rows = await sb.select(
       'feedback_job_runs',
-      `select=steps,started_at,finished_at&status=in.(success,error)&order=started_at.desc&limit=15`,
+      `id=eq.${encodeURIComponent(execId)}&select=id,status`,
     )
-    for (const row of rows || []) {
-      const u = extractFetchUntilFromRun(row)
-      if (u) {
-        lastUntilIso = u
-        lastStartIso = row.started_at || null
-        break
-      }
-    }
+    const row = rows?.[0]
+    if (row?.status !== 'error') return false
+    await sb.delete('feedback_job_runs', `id=eq.${encodeURIComponent(execId)}`)
+    await sb.insert('feedback_job_runs', {
+      id: execId,
+      started_at: startedAtIso,
+      status: 'running',
+      trigger,
+      steps: [],
+    })
+    console.log(`[FeedbackJob] Slot ${execId}: run anterior com erro removido; nova tentativa.`)
+    return true
   } catch {
-    lastUntilIso = null
+    return false
+  }
+}
+
+// Janela em “sliding” de FEEDBACK_JOB_WINDOW_MINUTES (default 90) até agora.
+// Se a última execução com sucesso terminou há mais que o intervalo esperado (ex.: 60 min),
+// amplia o lookback em até FEEDBACK_JOB_MAX_LOOKBACK_EXTENSION_MINUTES (atraso / run perdido).
+// bufferMinutes mantido na assinatura por compatibilidade (não entra mais no cálculo).
+export async function computeAdaptiveWindow(
+  sb,
+  defaultWindowMinutes,
+  bufferMinutes,
+  maxWindowMinutes = 0,
+  env = {},
+) {
+  void bufferMinutes
+  const now = new Date()
+  const windowMin = Number(defaultWindowMinutes) || 90
+  const expectedInterval = Number(env.FEEDBACK_JOB_EXPECTED_INTERVAL_MINUTES ?? 60) || 60
+  const maxExtension = Number(env.FEEDBACK_JOB_MAX_LOOKBACK_EXTENSION_MINUTES ?? 120) || 120
+
+  let since = new Date(now.getTime() - windowMin * 60 * 1000)
+  let basedOn = 'sliding_window'
+  let extraBackMinutes = 0
+  let lastSuccessFinishedAt = null
+
+  try {
+    const rows = await sb.select(
+      'feedback_job_runs',
+      `select=finished_at&status=eq.success&order=finished_at.desc&limit=1`,
+    )
+    lastSuccessFinishedAt = rows?.[0]?.finished_at || null
+  } catch {
+    /* ignore */
   }
 
-  let since
-  let basedOn
-  let extraMinutes = 0
-
-  if (lastUntilIso) {
-    const lastUntil = new Date(lastUntilIso)
-    since = new Date(lastUntil.getTime() - bufferMinutes * 60 * 1000)
-    basedOn = 'after_previous_fetch_until'
-    if (lastStartIso) {
-      const lastStart = new Date(lastStartIso)
-      extraMinutes = Math.max(0, Math.round((now.getTime() - lastStart.getTime()) / 60000) - 60)
+  if (lastSuccessFinishedAt) {
+    const gapMin = Math.round((now.getTime() - new Date(lastSuccessFinishedAt).getTime()) / 60000)
+    extraBackMinutes = Math.max(0, Math.min(maxExtension, gapMin - expectedInterval))
+    if (extraBackMinutes > 0) {
+      since = new Date(since.getTime() - extraBackMinutes * 60 * 1000)
+      basedOn = 'sliding_window_extended_missed_or_late'
     }
-  } else {
-    since = minSince
-    basedOn = 'cold_start'
   }
 
   if (since > now) {
@@ -221,7 +240,7 @@ export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinu
 
   const minWidthMs = 2 * 60 * 1000
   if (now.getTime() - since.getTime() < minWidthMs) {
-    since = minSince
+    since = new Date(now.getTime() - windowMin * 60 * 1000)
     basedOn = `${basedOn}_min_width`
   }
 
@@ -239,9 +258,9 @@ export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinu
     untilIso: now.toISOString(),
     window_minutes: windowMinutes,
     based_on: basedOn,
-    extra_minutes_over_hour: extraMinutes,
-    last_fetch_until: lastUntilIso,
-    last_run_started_at: lastStartIso,
+    extra_minutes_over_hour: extraBackMinutes,
+    last_fetch_until: null,
+    last_run_started_at: lastSuccessFinishedAt,
   }
 }
 
@@ -1068,8 +1087,11 @@ export async function runFeedbackJob(env, trigger = 'cron') {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY não configurado')
 
   const sb = makeSupabaseClient(SUPABASE_URL_FEEDBACK, SUPABASE_KEY_FEEDBACK)
-  const execId = generateJobExecutionId()
   const startedAt = new Date()
+  const useHourSlot =
+    String(env.FEEDBACK_JOB_USE_HOUR_SLOT_LOCK ?? 'true').toLowerCase() !== 'false' &&
+    ['cron', 'startup_catchup', 'queued'].includes(trigger)
+  const execId = useHourSlot ? makeCronHourSlotExecId(startedAt) : generateJobExecutionId()
   const steps = []
   const addStep = (type, detail) => steps.push({ type, at: new Date().toISOString(), ...detail })
 
@@ -1078,16 +1100,37 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     Number(FEEDBACK_JOB_WINDOW_MINUTES),
     Number(FEEDBACK_JOB_BUFFER_MINUTES),
     Number(FEEDBACK_JOB_MAX_WINDOW_MINUTES) || 0,
+    env,
   )
 
-  // Cria registro inicial
-  await sb.insert('feedback_job_runs', {
-    id: execId,
-    started_at: startedAt.toISOString(),
-    status: 'running',
-    trigger,
-    steps: [],
-  }).catch((e) => console.error('[FeedbackJob] Falha ao criar run:', e.message))
+  const startedAtIso = startedAt.toISOString()
+  try {
+    await sb.insert('feedback_job_runs', {
+      id: execId,
+      started_at: startedAtIso,
+      status: 'running',
+      trigger,
+      steps: [],
+    })
+  } catch (e) {
+    if (useHourSlot && isUniqueViolation(e)) {
+      const reclaimed = await reclaimHourSlotIfPreviousFailed(sb, execId, startedAtIso, trigger)
+      if (!reclaimed) {
+        console.log(
+          `[FeedbackJob] Ignorado: slot ${execId} já existe (outra instância ou execução nesta hora UTC).`,
+        )
+        return {
+          skipped: true,
+          id: execId,
+          reason: 'duplicate_hour_slot',
+          trigger,
+        }
+      }
+    } else {
+      console.error('[FeedbackJob] Falha ao criar run:', e.message)
+      throw e
+    }
+  }
 
   console.log(
     `[FeedbackJob] ▶ Iniciado ${execId} (trigger: ${trigger}) | janela=${windowInfo.window_minutes}min ` +
