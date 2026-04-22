@@ -1,0 +1,517 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "telefone",
+              "type": "any"
+            },
+            {
+              "name": "id_lead",
+              "type": "any"
+            },
+            {
+              "name": "Curso",
+              "type": "any"
+            },
+            {
+              "name": "Tipo de ingresso"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -704,
+        16
+      ],
+      "id": "32670d5a-d01b-4f3a-9f22-2a367e72f3f8",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://admamoeduitcombr.kommo.com/api/v2/salesbot/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "=authorization",
+              "value": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjA0NWI0OWI2MTA3NTgxMTk4ZmQyZGQyNDViMDU1MzE2MWIzNjFkZmU1ZWEwMDhhNGVhYTU3YTFlYjY3MWRlMjFlMTczMmQ2MjM3M2ZiZGVmIn0.eyJhdWQiOiJlMTg0MDljOS0yZmQxLTQyY2QtOWM5YS1lYTA4ODZjMzg1MTgiLCJqdGkiOiIwNDViNDliNjEwNzU4MTE5OGZkMmRkMjQ1YjA1NTMxNjFiMzYxZGZlNWVhMDA4YTRlYWE1N2ExZWI2NzFkZTIxZTE3MzJkNjIzNzNmYmRlZiIsImlhdCI6MTc2Njc2MzQ5NCwibmJmIjoxNzY2NzYzNDk0LCJleHAiOjE4MTgwMjg4MDAsInN1YiI6IjgyNjE4MzciLCJncmFudF90eXBlIjoiIiwiYWNjb3VudF9pZCI6MzAyMTQ1NjgsImJhc2VfZG9tYWluIjoia29tbW8uY29tIiwidmVyc2lvbiI6Miwic2NvcGVzIjpbImNybSIsImZpbGVzIiwiZmlsZXNfZGVsZXRlIiwibm90aWZpY2F0aW9ucyIsInB1c2hfbm90aWZpY2F0aW9ucyJdLCJoYXNoX3V1aWQiOiJmNDRhYjcxNi01NzY2LTQ2NjctYTljMC04NmZkNGE0NmEyZWUiLCJ1c2VyX2ZsYWdzIjowLCJhcGlfZG9tYWluIjoiYXBpLWcua29tbW8uY29tIn0.jDrGDQ_PHcLOCoRmcpdjOM14OyzecBFOA58iFX-HkL3C8ADgeEg9JRBwhFfhqbqwjsc4VjPnb9jyLEb59ik5vIRDKhkNbl6KiyBaAK7v0c6QtyvFpi6yYGygJqLGJTbW_jlzlnJy_V_3MAKAyrywMdNhPVJSN8lBnbmmJH8QUirWzfcSJIBuMdAn9T7jYpcZkwQWNvfr5E_YDSZd_bYyY8gIXI0s7vC-GuHhVPun4yQ4n81duNwU1BnU81Eq4V8v6qXAithTid0jm9b4jXP_7sxnIT3478Qh7WXznKopewAP1pafOQmyf-qQ71_jf5g7F7Crk0HkTMYI8z-OC1lNfw"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ [ { \"entity_type\": \"leads\", \"entity_id\": $json.id_lead, \"bot_id\": 46605 } ] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        16
+      ],
+      "id": "05f04677-236b-4f5a-a57f-0a538f66cc6e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e283fa3a-89d7-4de3-8691-37d41d0bf85a",
+              "name": "retorno",
+              "value": "atendimento distribuido para consultor",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2096,
+        16
+      ],
+      "id": "f3b078bd-5d48-47ea-a818-a37ff0f15126",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $('When Executed by Another Workflow').item.json.telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "atendimento_ia",
+              "fieldValue": "pause"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        16
+      ],
+      "id": "db4756ab-2ec4-4b09-ac5c-5a5285cf8bbb",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "chat_messages",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "phone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        192,
+        16
+      ],
+      "id": "f0eb9480-cb88-4283-8311-cd29f37bdc8e",
+      "name": "Get many rows2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena por created_at ASC e formata o histórico\nconst sorted = items.sort((a, b) => \n  new Date(a.json.created_at) - new Date(b.json.created_at)\n);\n\nconst conversation = sorted.map(row => {\n  const userMsg = row.json.user_message ? `Usuário: ${row.json.user_message}` : '';\n  const botMsg = row.json.bot_message ? `Bot: ${row.json.bot_message}` : '';\n  return [userMsg, botMsg].filter(Boolean).join('\\n');\n}).join('\\n\\n');\n\nreturn [{ json: { conversation } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        16
+      ],
+      "id": "c67898df-9aa5-4571-9dba-af9340137364",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Prompt para Agente de Resumo de Conversas\nVocê é um assistente especializado em resumir conversas do WhatsApp entre o assistente virtual comercial da Cruzeiro do Sul e candidatos.\nSua Tarefa\nAnalise a conversa completa abaixo e crie um resumo estruturado:\n{{$json.conversation}}\nInformações para Identificar\n\nNome do candidato: Procure por qualquer menção ao nome (completo ou primeiro nome)\nNível de interesse: Graduação, Pós-graduação ou Não informado\nCurso específico: Nome exato do curso mencionado\nInformações fornecidas: Valores, prazos, links, documentos, detalhes de inscrição\nStatus: Se o candidato ainda está respondendo ou parou de responder\n\nClassificação de Níveis\n\nGraduação: Bacharelado, licenciatura, tecnólogo (ex: Administração, Engenharia, Direito, Psicologia)\nPós-graduação: MBA, especialização, mestrado, doutorado\nNão informado: Quando não fica claro o nível de interesse\n\nFormato de Resposta Obrigatório\nResumo: [2-6 frases descrevendo o que aconteceu na conversa, incluindo nome do candidato se mencionado e principais informações fornecidas pelo assistente]\nNome do candidato: [Nome identificado ou \"Não informado\"]\nNível: [Graduação/Pós-graduação/Não informado]\nCurso: [Nome do curso ou \"Não informado\"]\nInformações fornecidas pela IA: [Liste as principais informações, orientações, valores, links ou documentos que a IA compartilhou com o candidato]\nStatus da conversa: [Candidato respondeu/Candidato parou de responder]\nIMPORTANTE: Responda APENAS no formato acima, sem repetir estas instruções.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        640,
+        16
+      ],
+      "id": "a3e21fb5-907b-49ce-ba9f-966eef01b2b0",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        240
+      ],
+      "id": "92a736ab-72d0-4534-aa2d-781943e8c7a7",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "notes",
+        "operation": "createNotes",
+        "notes": {
+          "common": [
+            {
+              "entity_id": "={{ $('When Executed by Another Workflow').first().json.id_lead }}",
+              "text": "={{ $json.resumo }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        1216,
+        16
+      ],
+      "id": "ddd29b74-8c81-4be6-bf55-44fe872c1d30",
+      "name": "Create new notes",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrator de campos do resumo (corrigido)\nconst inputText = $input.all()[0].json.text;\n\n// Lista de possíveis campos do texto do agente\nconst fieldNames = [\n  \"Resumo\",\n  \"Nome do candidato\",\n  \"Nível\",\n  \"Nivel\",\n  \"Curso\",\n  \"Informações fornecidas pela IA\",\n  \"Status da conversa\",\n  \"Status\"\n];\n\n// Função genérica para extrair o valor de um campo até o próximo campo conhecido\nfunction extractField(text, fieldName) {\n  // Monta regex dinâmica baseada nos nomes dos outros campos\n  const others = fieldNames.filter(f => f !== fieldName).join(\"|\");\n  const regex = new RegExp(\n    `${fieldName}:\\\\s*([\\\\s\\\\S]*?)(?=\\\\n(?:${others}):|$)`,\n    \"i\"\n  );\n  const match = text.match(regex);\n  return match ? match[1].trim().replace(/\\s+/g, \" \") : \"\";\n}\n\n// Extrai campos principais\nconst resumo = extractField(inputText, \"Resumo\") || \"Não informado\";\nconst nome = extractField(inputText, \"Nome do candidato\") || \"Não informado\";\nconst nivel = extractField(inputText, \"Nível\") || extractField(inputText, \"Nivel\") || \"Não informado\";\nconst curso = extractField(inputText, \"Curso\") || \"Não informado\";\nconst infoIA = extractField(inputText, \"Informações fornecidas pela IA\") || \"Não informado\";\nconst status = extractField(inputText, \"Status da conversa\") || extractField(inputText, \"Status\") || \"Não informado\";\n\n// Retorna objeto JSON estruturado\nreturn [{\n  json: {\n    resumo,\n    nome_candidato: nome,\n    nivel,\n    curso,\n    informacoes_ia: infoIA,\n    status_conversa: status,\n    texto_original: inputText\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        16
+      ],
+      "id": "41619ef1-84b9-4598-a020-c732d153224e",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "resource": "leads",
+        "operation": "updateLeads",
+        "collection": {
+          "lead": [
+            {
+              "id": "={{ $('When Executed by Another Workflow').first().json.id_lead }}",
+              "pipeline_id": 5481944,
+              "status_id": 48539246,
+              "custom_fields_values": {
+                "custom_field": [
+                  {
+                    "data": "{\"id\":31782,\"type\":\"text\"}",
+                    "value": "={{ $('When Executed by Another Workflow').first().json.Curso }}"
+                  },
+                  {
+                    "data": "{\"id\":31786,\"type\":\"text\"}",
+                    "value": "={{ $('Code2').item.json.nivel }}"
+                  },
+                  {
+                    "data": "{\"id\":304628,\"type\":\"text\"}",
+                    "value": "={{ $('Code2').item.json.nome_candidato }}"
+                  },
+                  {
+                    "data": "{\"id\":693837,\"type\":\"select\"}",
+                    "value": "polo mais próximo"
+                  },
+                  {
+                    "data": "{\"id\":693843,\"type\":\"select\"}",
+                    "value": "={{ $('When Executed by Another Workflow').first().json['Tipo de ingresso'] }}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        16
+      ],
+      "id": "7c099779-aa6f-4888-b384-f544f1f198c4",
+      "name": "Update leads1",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "distribuicao_por_consultor",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_lead",
+              "fieldValue": "={{ $json._embedded.leads[0].id }}"
+            },
+            {
+              "fieldId": "timestamp",
+              "fieldValue": "={{ $now }}"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "=whatsapp"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1728,
+        16
+      ],
+      "id": "fd69d94c-0700-4cf5-886a-0fd5bbd898bf",
+      "name": "Create a row1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "inscricao_ab",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_lead",
+              "fieldValue": "={{ $('When Executed by Another Workflow').item.json.id_lead }}"
+            },
+            {
+              "fieldId": "Atendimento",
+              "fieldValue": "IA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        16
+      ],
+      "id": "5378796b-2034-40ef-8386-5ef37fb787af",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "Get many rows2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows2": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create new notes": {
+      "main": [
+        [
+          {
+            "node": "Update leads1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Create new notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update leads1": {
+      "main": [
+        [
+          {
+            "node": "Create a row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "telefone": "5511988213077@s.whatsapp.net",
+        "id_lead": 21026517,
+        "Curso": "Serviço Social",
+        "Tipo de ingresso": "Vestibular Múltipla Escolha"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}

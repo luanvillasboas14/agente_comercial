@@ -1,0 +1,321 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/geocode/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "address",
+              "value": "={{ $('When Executed by Another Workflow').item.json['localização'] }}"
+            },
+            {
+              "name": "region",
+              "value": "br"
+            },
+            {
+              "name": "language",
+              "value": "pt-BR"
+            },
+            {
+              "name": "key",
+              "value": "AIzaSyCjqYZ9w4PlXyjZwUkxS1EywSQAygs098M"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        192,
+        32
+      ],
+      "id": "66836681-b81b-459a-82fa-0078127bbb4c",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "polo_loc"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        592,
+        304
+      ],
+      "id": "2415544f-6d28-41f9-b70c-6b6659b7a79b",
+      "name": "Get many rows1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "71OBWtC8t38iEtPO",
+          "name": "Supabase Academico"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Etapa 2 – Extrai latitude/longitude do resultado do Geocoding\n * Entrada esperada: resposta JSON do HTTP Request do Google Maps\n * Saída: objeto com origemString (\"lat,lng\"), origem (objeto), departure e limite_polos\n */\n\nconst res = $json;\n\n// Verifica se veio resposta válida\nif (!res.results || !Array.isArray(res.results) || res.results.length === 0) {\n  return [\n    {\n      json: {\n        status: \"error\",\n        message: res.error_message || \"Endereço ou CEP não encontrado\",\n        raw: res\n      }\n    }\n  ];\n}\n\n// Pega o primeiro resultado do Google (mais relevante)\nconst first = res.results[0];\nconst loc = first.geometry?.location;\n\n// Valida se tem latitude/longitude\nif (!loc || typeof loc.lat !== \"number\" || typeof loc.lng !== \"number\") {\n  return [\n    {\n      json: {\n        status: \"error\",\n        message: \"Resposta do Geocoding não contém coordenadas válidas\",\n        raw: res\n      }\n    }\n  ];\n}\n\n// Monta o objeto de origem\nconst origem = {\n  lat: loc.lat,\n  lng: loc.lng,\n  endereco_formatado: first.formatted_address || null,\n  place_id: first.place_id || null\n};\n\n// Monta string \"lat,lng\" (usada pela Distance Matrix)\nconst origemString = `${loc.lat},${loc.lng}`;\n\n// Define horário de partida (agora)\nconst departure = \"now\";\n\n// Define limite máximo de polos a analisar (para otimizar requisições)\nconst limite_polos = 50;\n\n// Retorna em formato que o próximo nó entende\nreturn [\n  {\n    json: {\n      origem,\n      origemString,\n      departure,\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        32
+      ],
+      "id": "ebf6dbd2-4e05-4635-9d2a-0826ed6d38fe",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1152,
+        96
+      ],
+      "id": "a63f46dd-74de-444f-8b20-a61e8058f3f0",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Calcula os 2 polos mais próximos da origem (em linha reta)\n * Entrada: origem (objeto com lat/lng) + lista de polos com latitude/longitude\n * Saída: dois polos mais próximos e ordenados por distância\n */\n\n// Função para calcular distância (Haversine)\nfunction calcularDistanciaKm(lat1, lon1, lat2, lon2) {\n  const R = 6371; // Raio da Terra em km\n  const dLat = (lat2 - lat1) * Math.PI / 180;\n  const dLon = (lon2 - lon1) * Math.PI / 180;\n  const a =\n    Math.sin(dLat / 2) ** 2 +\n    Math.cos(lat1 * Math.PI / 180) *\n      Math.cos(lat2 * Math.PI / 180) *\n      Math.sin(dLon / 2) ** 2;\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));\n  return R * c;\n}\n\n// Separa origem e polos\nconst all = $input.all().map(i => i.json);\nconst origem = all.find(i => i.origem);\nconst polos = all.filter(i => i.latitude && i.longitude);\n\nif (!origem) {\n  return [{ json: { status: \"erro\", message: \"Origem não encontrada\" } }];\n}\n\n// Calcula distâncias\nconst resultados = polos.map(p => ({\n  id: p.id,\n  nome: p.nome,\n  endereco: p.endereco,\n  latitude: p.latitude,\n  longitude: p.longitude,\n  distancia_km: calcularDistanciaKm(origem.origem.lat, origem.origem.lng, p.latitude, p.longitude)\n}));\n\n// Ordena por menor distância\nresultados.sort((a, b) => a.distancia_km - b.distancia_km);\n\n// Retorna os 2 mais próximos\nconst proximos = resultados.slice(0, 2);\n\nreturn [{ json: { origem: origem.origem, polos_proximos: proximos } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        128
+      ],
+      "id": "4ccedb33-2538-4e9e-b4e7-2c9d0c90daf5",
+      "name": "Code in JavaScript7"
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/distancematrix/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "origins",
+              "value": "={{ $json.origem.lat }},{{ $json.origem.lng }}"
+            },
+            {
+              "name": "destinations",
+              "value": "-23.586594,-46.717387|-23.595332,-46.524891|-23.49556,-46.697923|-23.585067,-46.583863|-23.50424,-46.623449|-23.522932,-46.663319|-23.639403,-46.8017|-22.967422,-47.128864|-22.995432,-47.505319|-23.606949,-46.756408|-23.608091,-46.664971|-22.438788,-46.82259|-23.59112,-46.63524"
+            },
+            {
+              "name": "mode",
+              "value": "transit"
+            },
+            {
+              "name": "region",
+              "value": "br"
+            },
+            {
+              "name": "language",
+              "value": "pt-BR"
+            },
+            {
+              "name": "key",
+              "value": "AIzaSyCjqYZ9w4PlXyjZwUkxS1EywSQAygs098M"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1584,
+        128
+      ],
+      "id": "fa6bfcb6-a38b-4784-9ee7-8eb36bd55503",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Etapa final — Analisa o resultado do Google Distance Matrix\n * e retorna APENAS:\n *  - polo mais próximo\n *  - rua/endereço do polo mais próximo\n *  - tempo até o polo mais próximo\n *  - link do Google Maps\n */\n\n// === 1. Carrega os dados ===\nconst data = Array.isArray($json) ? $json[0] : $json;\nconst polos = $items(\"Get many rows1\").map(i => i.json); // polos do Supabase\n\n// Validação básica da resposta do Distance Matrix\nif (!data || !data.rows?.length || !data.rows[0]?.elements) {\n  return [{\n    json: {\n      status: \"erro\",\n      message: \"Formato inválido da resposta Distance Matrix\",\n      raw: data\n    }\n  }];\n}\n\nconst elements = data.rows[0].elements;\nconst destinations = data.destination_addresses || [];\nconst origin = data.origin_addresses?.[0] || \"Origem não identificada\";\n\n// === 2. Combina Distance Matrix + polos ===\nconst resultados = [];\n\nfor (let i = 0; i < elements.length; i++) {\n  const e = elements[i];\n  if (e.status === \"OK\") {\n    const destino = destinations[i] || \"Endereço não encontrado\";\n    const polo = polos[i] || {};\n\n    resultados.push({\n      indice: i,\n      nome_polo: polo.nome || `Polo ${i + 1}`,\n      // se tiver campo \"rua\" no Supabase, usa; senão cai pro endereço completo/destino\n      rua_polo: polo.rua || polo.endereco || destino,\n      endereco_polo: polo.endereco || destino,\n      distancia_metros: e.distance.value,\n      distancia_texto: e.distance.text,\n      duracao_segundos: e.duration.value,\n      duracao_texto: e.duration.text,\n      destino_google: destino,\n    });\n  }\n}\n\n// Se nada OK, retorna erro\nif (resultados.length === 0) {\n  return [{\n    json: {\n      status: \"erro\",\n      message: \"Nenhum destino com status OK\",\n      raw: data\n    }\n  }];\n}\n\n// === 3. Ordena por menor tempo (mais rápido) ===\nresultados.sort((a, b) => a.duracao_segundos - b.duracao_segundos);\nconst maisRapido = resultados[0];\n\n// === 4. Monta link do Google Maps ===\nconst origemParam = encodeURIComponent(origin);\nconst destinoParam = encodeURIComponent(maisRapido.destino_google);\nconst linkRota = `https://www.google.com/maps/dir/?api=1&origin=${origemParam}&destination=${destinoParam}&travelmode=transit`;\n\n// === 5. Retorna APENAS os campos pedidos ===\nreturn [\n  {\n    json: {\n      polo_mais_proximo: maisRapido.nome_polo,\n      rua_polo_mais_proximo: maisRapido.rua_polo,\n      tempo_polo_mais_proximo: maisRapido.duracao_texto,\n      link_google: linkRota\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        128
+      ],
+      "id": "c91f9780-2f93-4981-9142-bc994d3dfb2e",
+      "name": "Code in JavaScript8"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "118fbe65-b36d-4a91-bb6a-c6536e397480",
+              "name": "polo mais rápido",
+              "value": "={{ $json.polo_mais_proximo }}",
+              "type": "string"
+            },
+            {
+              "id": "69b4464c-f5e3-4298-8eb2-3fd82c0c87ca",
+              "name": "tempo",
+              "value": "={{ $json.tempo_polo_mais_proximo }}",
+              "type": "string"
+            },
+            {
+              "id": "902bd441-493e-4d06-9fce-11d18e058604",
+              "name": "link da rota",
+              "value": "={{ $json.link_google }}",
+              "type": "string"
+            },
+            {
+              "id": "bd9000f9-dd07-4b54-b38e-50bb1d1806bc",
+              "name": "rua do polo",
+              "value": "={{ $json.rua_polo_mais_proximo }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2000,
+        128
+      ],
+      "id": "ba3ebceb-836d-4bb3-84d4-282c45d606d9",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "telefone"
+            },
+            {
+              "name": "localização"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -480,
+        160
+      ],
+      "id": "346e7718-074e-4e85-9aec-25ed376c2883",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "connections": {
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript8": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get many rows1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "telefone": "09e2fed7ace94a7d84108f9527779927",
+        "localização": "São Paulo, Avenida Francisco Mattarazzo, 1850"
+      }
+    ]
+  },
+  "meta": {
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}
