@@ -2,6 +2,7 @@ import express from 'express'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
+import { runNearestPolo } from './server/locationTool.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -118,6 +119,21 @@ app.get('/api/feedback-job/status', async (_req, res) => {
   }
 })
 
+// ── Tool localização (geocode + polo_loc + Distance Matrix) ──
+
+app.post('/api/location/nearest-polo', async (req, res) => {
+  try {
+    const out = await runNearestPolo(process.env, req.body || {})
+    if (!out.ok) {
+      res.status(400).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // ── Static files ──
 
 app.use(express.static(join(__dirname, 'dist')))
@@ -126,9 +142,11 @@ app.get('*path', (_req, res) => {
 })
 
 app.listen(PORT, () => {
+  const maps = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY
   console.log(`[Server] Listening on port ${PORT}`)
   console.log(`[Server] Supabase proxy (IA): ${SUPABASE_URL ? 'active' : 'DISABLED'}`)
   console.log(`[Server] Supabase proxy (Feedback): ${SUPABASE_URL_FEEDBACK ? 'active' : 'DISABLED'}`)
+  console.log(`[Server] Location tool (Google Maps): ${maps ? 'active' : 'DISABLED'}`)
 }).on('error', (err) => {
   console.error('[Server] Listen error:', err.message)
 })

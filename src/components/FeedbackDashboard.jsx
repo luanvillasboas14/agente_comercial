@@ -370,60 +370,6 @@ export default function FeedbackDashboard() {
               </div>
             </div>
 
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">
-                  <Activity size={14} />
-                  Últimas execuções
-                </div>
-                <span className="card-title-sub">{Math.min(runs.length, 15)} de {runs.length}</span>
-              </div>
-              <div className="card-body">
-                <div className="run-table-wrap">
-                  <table className="run-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Início</th>
-                        <th className="num">Duração</th>
-                        <th className="num">Msgs</th>
-                        <th className="num">FB</th>
-                        <th className="num">Pend.</th>
-                        <th className="num">Tokens</th>
-                        <th className="num">Custo</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {runs.slice(0, 15).map((r) => {
-                        const cost = calcRunCostBRL(r)
-                        const started = new Date(r.started_at).toLocaleString('pt-BR', {
-                          day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-                        })
-                        return (
-                          <tr key={r.id}>
-                            <td className="mono">{r.id}</td>
-                            <td className="tnum">{started}</td>
-                            <td className="num tnum">{formatDuration(r.duration_ms)}</td>
-                            <td className="num tnum">{formatInt(r.total_messages_fetched)}</td>
-                            <td className="num tnum">{formatInt((r.feedbacks_inserted || 0) + (r.feedbacks_updated || 0))}</td>
-                            <td className="num tnum">{formatInt(r.pendentes_saved)}</td>
-                            <td className="num tnum">{formatInt(r.total_tokens)}</td>
-                            <td className="num tnum">{formatBRL(cost)}</td>
-                            <td>
-                              <span className={`badge ${r.status === 'success' ? 'success' : r.status === 'error' ? 'danger' : 'info'}`}>
-                                {r.status}
-                              </span>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                  {runs.length === 0 && <div className="empty">Sem execuções no período</div>}
-                </div>
-              </div>
-            </div>
           </>
         )}
       </div>

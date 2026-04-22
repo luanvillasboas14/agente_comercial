@@ -71,6 +71,36 @@ export async function buscarPerguntas(query, apiKey) {
   return vectorSearch('match_documents_perguntas', query, apiKey, 6)
 }
 
+/** Tool localização — chama API do servidor (Google Geocoding + Supabase polo_loc + Distance Matrix). */
+export async function executarLocalizacao(args) {
+  const res = await fetch('/api/location/nearest-polo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      localizacao: args.localizacao,
+      telefone: args.telefone,
+    }),
+  })
+  let data
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error('Resposta inválida da API de localização')
+  }
+  if (!data.ok) {
+    return `Não foi possível encontrar o polo mais próximo: ${data.error || `HTTP ${res.status}`}`
+  }
+  const lines = [
+    `Polo mais próximo: ${data.polo_mais_proximo}`,
+    `Endereço do polo: ${data.rua_do_polo}`,
+    `Tempo estimado (${data.modo_transporte}): ${data.tempo_estimado}`,
+    data.distancia ? `Distância aproximada: ${data.distancia}` : null,
+    `Link da rota no Google Maps: ${data.link_rota_google}`,
+    data.origem_endereco ? `Endereço reconhecido do lead: ${data.origem_endereco}` : null,
+  ].filter(Boolean)
+  return lines.join('\n')
+}
+
 export const TOOL_DEFINITIONS = [
   {
     type: 'function',
@@ -140,6 +170,30 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'localizacao',
+      description:
+        'Encontra o polo da Cruzeiro do Sul mais próximo do endereço informado pelo lead. ' +
+        'Use quando houver CEP, cidade, bairro, rua com número ou descrição de local. ' +
+        'Chame com o texto completo de localização que o usuário passou (ex.: "São Paulo, Av. Paulista, 1000" ou "01310-100").',
+      parameters: {
+        type: 'object',
+        properties: {
+          localizacao: {
+            type: 'string',
+            description: 'Cidade, rua e número ou CEP (texto livre para geocodificação)',
+          },
+          telefone: {
+            type: 'string',
+            description: 'Telefone do lead (opcional; reservado para rastreio)',
+          },
+        },
+        required: ['localizacao'],
+      },
+    },
+  },
 ]
 
 export const TOOL_EXECUTORS = {
@@ -147,4 +201,5 @@ export const TOOL_EXECUTORS = {
   buscar_informacoes: (args, apiKey) => buscarInformacoes(args.query, apiKey),
   buscar_pos: (args, apiKey) => buscarPos(args.query, apiKey),
   buscar_perguntas: (args, apiKey) => buscarPerguntas(args.query, apiKey),
+  localizacao: (args) => executarLocalizacao(args),
 }

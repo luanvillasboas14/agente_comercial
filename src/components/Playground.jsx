@@ -49,12 +49,13 @@ export default function Playground({ prompts }) {
 Você está em um ambiente de teste (Playground). As regras abaixo substituem qualquer instrução conflitante dos prompts acima:
 
 1. RESPONDA SEMPRE EM LINGUAGEM NATURAL, nunca em XML, JSON ou templates estruturados.
-2. Você tem 4 tools reais disponíveis: buscar_precos, buscar_informacoes, buscar_pos, buscar_perguntas. USE-AS SEMPRE que o usuário perguntar sobre cursos, preços ou tiver dúvidas.
-3. Quando buscar preços ou informações, apresente os resultados encontrados ao usuário de forma clara e objetiva.
-4. Se a busca retornar cursos com nomes parecidos (ex: usuário pediu "Economia" e a base tem "Ciências Econômicas"), apresente os cursos encontrados e pergunte se é o que o usuário procura, em vez de dizer que não encontrou.
-5. NÃO mencione ferramentas internas, tools, agentes ou contexto técnico ao usuário.
-6. As tools inscricao, distribuir_humano e localizacao NÃO existem neste ambiente. Ignore instruções sobre elas.
-7. Seja direto, profissional e acolhedor.`
+2. Você tem 5 tools reais: buscar_precos, buscar_informacoes, buscar_pos, buscar_perguntas e localizacao. USE-AS quando couber: cursos/preços/FAQ e também localização (CEP, endereço, cidade, polo).
+3. Para localização, execute localizacao com o texto completo que o usuário informou (cidade, rua e número ou CEP) e apresente polo, endereço, tempo estimado e o link da rota.
+4. Quando buscar preços ou informações, apresente os resultados encontrados ao usuário de forma clara e objetiva.
+5. Se a busca retornar cursos com nomes parecidos (ex: usuário pediu "Economia" e a base tem "Ciências Econômicas"), apresente os cursos encontrados e pergunte se é o que o usuário procura, em vez de dizer que não encontrou.
+6. NÃO mencione ferramentas internas, tools, agentes ou contexto técnico ao usuário.
+7. As tools inscricao e distribuir_humano NÃO existem neste ambiente. Ignore instruções sobre elas.
+8. Seja direto, profissional e acolhedor.`
 
     return promptsText + '\n\n---\n\n' + playgroundOverride
   }
@@ -91,6 +92,7 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
         buscar_informacoes: 'Buscando informações do curso no Supabase',
         buscar_pos: 'Buscando pós-graduação no Supabase',
         buscar_perguntas: 'Buscando na base de perguntas',
+        localizacao: 'Buscando polo mais próximo (Google Maps + base de polos)',
       }
       setToolStatus(toolLabel[fn.name] || `Executando ${fn.name}...`)
 
