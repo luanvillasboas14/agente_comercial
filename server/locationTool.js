@@ -46,8 +46,9 @@ async function googleGeocode(address, apiKey) {
 }
 
 async function fetchPolos(supabaseUrl, supabaseKey, limit = 2000) {
+  // Tabela polo_loc: id, nome, endereco, latitude, longitude, geo (geo não é necessário aqui)
   const q = [
-    'select=id,nome,endereco,latitude,longitude,rua',
+    'select=id,nome,endereco,latitude,longitude',
     'order=id.asc',
     `limit=${limit}`,
   ].join('&')
@@ -110,7 +111,7 @@ function pickBestFromMatrix(matrixJson, polos, originFormatted, travelMode = 'tr
   const best = candidatos[0]
   const p = best.polo
   const nome = p.nome || 'Polo'
-  const rua = p.rua || p.endereco || best.destino_google
+  const enderecoPolo = p.endereco || best.destino_google
   const origemParam = encodeURIComponent(originAddr)
   const destinoParam = encodeURIComponent(best.destino_google)
   const mode = travelMode === 'driving' ? 'driving' : 'transit'
@@ -118,7 +119,7 @@ function pickBestFromMatrix(matrixJson, polos, originFormatted, travelMode = 'tr
 
   return {
     polo_mais_proximo: nome,
-    rua_polo_mais_proximo: rua,
+    rua_polo_mais_proximo: enderecoPolo,
     tempo_polo_mais_proximo: best.duracao_texto,
     distancia_texto: best.distancia_texto,
     link_google: linkRota,
