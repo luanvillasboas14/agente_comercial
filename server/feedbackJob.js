@@ -1055,6 +1055,9 @@ export async function runFeedbackJob(env, trigger = 'cron') {
   let feedbacksUpdated = 0
   let pendentesSaved = 0
   let aiCalls = 0
+  let promptTokens = 0
+  let completionTokens = 0
+  let totalTokens = 0
   let errorMessage = null
   let status = 'success'
 
@@ -1091,7 +1094,12 @@ export async function runFeedbackJob(env, trigger = 'cron') {
         base = await computeCommercialRules(sb, base)
 
         aiCalls++
-        const { content } = await callOpenAI(OPENAI_API_KEY, base)
+        const { content, usage } = await callOpenAI(OPENAI_API_KEY, base)
+        if (usage) {
+          promptTokens += usage.prompt_tokens || 0
+          completionTokens += usage.completion_tokens || 0
+          totalTokens += usage.total_tokens || ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0))
+        }
         const parsed = parseAIJson(content) || {}
         base.avaliacao = parsed.avaliacao ?? null
         base.nota_avaliacao = parsed.nota_avaliacao ?? null
@@ -1145,12 +1153,16 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     feedbacks_updated: feedbacksUpdated,
     pendentes_saved: pendentesSaved,
     ai_calls: aiCalls,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    model: OPENAI_MODEL,
     duration_ms: durationMs,
     error_message: errorMessage,
     steps,
   }).catch((e) => console.error('[FeedbackJob] Falha ao atualizar run:', e.message))
 
-  console.log(`[FeedbackJob] ${status === 'success' ? '✓' : '✗'} ${execId} | ${durationMs}ms | msgs=${totalMessagesFetched} seg=${totalSegments} ins=${feedbacksInserted} upd=${feedbacksUpdated} pend=${pendentesSaved} ai=${aiCalls}`)
+  console.log(`[FeedbackJob] ${status === 'success' ? '✓' : '✗'} ${execId} | ${durationMs}ms | msgs=${totalMessagesFetched} seg=${totalSegments} ins=${feedbacksInserted} upd=${feedbacksUpdated} pend=${pendentesSaved} ai=${aiCalls} tok=${totalTokens}`)
 
   return {
     id: execId,
@@ -1162,6 +1174,9 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     feedbacksUpdated,
     pendentesSaved,
     aiCalls,
+    promptTokens,
+    completionTokens,
+    totalTokens,
     errorMessage,
   }
 }

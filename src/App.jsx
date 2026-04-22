@@ -5,6 +5,7 @@ import PromptViewer from './components/PromptViewer'
 import Playground from './components/Playground'
 import ExecutionViewer from './components/ExecutionViewer'
 import FeedbackJobViewer from './components/FeedbackJobViewer'
+import FeedbackDashboard from './components/FeedbackDashboard'
 import './App.css'
 
 const STORAGE_KEY = 'prompt_edits'
@@ -166,6 +167,7 @@ export default function App() {
           {!loading && !error && page === 'playground' && <Playground prompts={prompts} />}
           {!loading && !error && page === 'executions' && <ExecutionViewer />}
           {!loading && !error && page === 'feedback' && <FeedbackJobViewer />}
+          {!loading && !error && page === 'feedback-dashboard' && <FeedbackDashboard />}
         </div>
       </main>
     </div>

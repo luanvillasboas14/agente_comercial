@@ -17,6 +17,39 @@ export async function getAllJobRuns() {
   }
 }
 
+// Busca runs em um intervalo [startIso, endIso] (inclusivos via started_at).
+// Usa paginação pra não perder registros se o período tiver muitas execuções.
+export async function getJobRunsByRange(startIso, endIso) {
+  const PAGE = 1000
+  const all = []
+  let offset = 0
+  try {
+    while (offset < 20000) {
+      const q = [
+        'select=*',
+        `started_at=gte.${encodeURIComponent(startIso)}`,
+        `started_at=lte.${encodeURIComponent(endIso)}`,
+        'order=started_at.desc',
+        `limit=${PAGE}`,
+        `offset=${offset}`,
+      ].join('&')
+      const res = await fetch(`${BASE}/rest/v1/feedback_job_runs?${q}`)
+      if (!res.ok) {
+        const err = await res.text().catch(() => '')
+        console.error('[FeedbackJobStore] Range fetch failed:', res.status, err)
+        break
+      }
+      const rows = await res.json()
+      all.push(...rows)
+      if (rows.length < PAGE) break
+      offset += PAGE
+    }
+  } catch (e) {
+    console.error('[FeedbackJobStore] Range fetch error:', e.message)
+  }
+  return all
+}
+
 // Busca o status do cron/job. Funciona tanto em dev (vite) quanto em prod (server.js).
 export async function getJobStatus() {
   try {
