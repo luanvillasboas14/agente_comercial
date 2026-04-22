@@ -1,6 +1,10 @@
 /**
- * Tool "localizacao" — espelha o subfluxo N8N (geocode + polo_loc + Haversine + Distance Matrix).
- * Requer: GOOGLE_MAPS_API_KEY, SUPABASE_URL, SUPABASE_KEY (mesmo projeto da tabela polo_loc).
+ * Tool "localizacao" — geocode + tabela de polos no Supabase + Haversine + Distance Matrix.
+ * Env:
+ *   GOOGLE_MAPS_API_KEY
+ *   SUPABASE_URL + SUPABASE_KEY (padrão para ler polos)
+ *   SUPABASE_POLO_URL + SUPABASE_POLO_KEY (opcional — outro projeto, ex. "Academico")
+ *   SUPABASE_POLO_TABLE (opcional, default polo_loc) — nome exato da tabela no Table Editor
  */
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -45,14 +49,15 @@ async function googleGeocode(address, apiKey) {
   }
 }
 
-async function fetchPolos(supabaseUrl, supabaseKey, limit = 2000) {
-  // Tabela polo_loc: id, nome, endereco, latitude, longitude, geo (geo não é necessário aqui)
+async function fetchPolos(supabaseUrl, supabaseKey, tableName, limit = 2000) {
+  // Colunas esperadas: id, nome, endereco, latitude, longitude (geo na base não é usada aqui)
+  const table = encodeURIComponent(tableName)
   const q = [
     'select=id,nome,endereco,latitude,longitude',
     'order=id.asc',
     `limit=${limit}`,
   ].join('&')
-  const res = await fetch(`${supabaseUrl}/rest/v1/polo_loc?${q}`, {
+  const res = await fetch(`${supabaseUrl}/rest/v1/${table}?${q}`, {
     headers: {
       apikey: supabaseKey,
       Authorization: `Bearer ${supabaseKey}`,
@@ -60,7 +65,16 @@ async function fetchPolos(supabaseUrl, supabaseKey, limit = 2000) {
   })
   if (!res.ok) {
     const t = await res.text()
-    throw new Error(`Supabase polo_loc ${res.status}: ${t.slice(0, 200)}`)
+    let hint = ''
+    try {
+      const j = JSON.parse(t)
+      if (j.code === '42P01') {
+        hint =
+          ' A tabela não existe neste banco. Confira o nome em Supabase (Table Editor), ' +
+          'ajuste SUPABASE_POLO_TABLE ou use SUPABASE_POLO_URL + SUPABASE_POLO_KEY se os polos estiverem em outro projeto.'
+      }
+    } catch { /* ignore */ }
+    throw new Error(`Supabase ${tableName} ${res.status}: ${t.slice(0, 280)}${hint}`)
   }
   const rows = await res.json()
   return Array.isArray(rows) ? rows : []
@@ -133,8 +147,10 @@ function pickBestFromMatrix(matrixJson, polos, originFormatted, travelMode = 'tr
  */
 export async function runNearestPolo(env, body) {
   const mapsKey = env.GOOGLE_MAPS_API_KEY || env.VITE_GOOGLE_MAPS_API_KEY
-  const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL
-  const supabaseKey = env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
+  // Polos: podem estar no mesmo projeto da IA ou em outro (ex.: "Supabase Academico" do N8N)
+  const poloUrl = env.SUPABASE_POLO_URL || env.SUPABASE_URL || env.VITE_SUPABASE_URL
+  const poloKey = env.SUPABASE_POLO_KEY || env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
+  const poloTable = String(env.SUPABASE_POLO_TABLE || env.POLO_LOC_TABLE || 'polo_loc').trim()
 
   const localizacao = String(body?.localizacao || body?.localização || '').trim()
   if (!localizacao) {
@@ -143,8 +159,8 @@ export async function runNearestPolo(env, body) {
   if (!mapsKey) {
     return { ok: false, error: 'GOOGLE_MAPS_API_KEY não configurada no servidor.' }
   }
-  if (!supabaseUrl || !supabaseKey) {
-    return { ok: false, error: 'SUPABASE_URL / SUPABASE_KEY não configurados.' }
+  if (!poloUrl || !poloKey) {
+    return { ok: false, error: 'SUPABASE_URL / SUPABASE_KEY (ou SUPABASE_POLO_*) não configurados.' }
   }
 
   const geo = await googleGeocode(localizacao, mapsKey)
@@ -155,7 +171,7 @@ export async function runNearestPolo(env, body) {
 
   let polos
   try {
-    polos = await fetchPolos(supabaseUrl, supabaseKey)
+    polos = await fetchPolos(poloUrl, poloKey, poloTable)
   } catch (e) {
     return { ok: false, error: e.message }
   }

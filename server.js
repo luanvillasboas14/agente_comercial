@@ -147,6 +147,13 @@ app.listen(PORT, () => {
   console.log(`[Server] Supabase proxy (IA): ${SUPABASE_URL ? 'active' : 'DISABLED'}`)
   console.log(`[Server] Supabase proxy (Feedback): ${SUPABASE_URL_FEEDBACK ? 'active' : 'DISABLED'}`)
   console.log(`[Server] Location tool (Google Maps): ${maps ? 'active' : 'DISABLED'}`)
+  const poloTable = process.env.SUPABASE_POLO_TABLE || process.env.POLO_LOC_TABLE || 'polo_loc'
+  const poloHost = process.env.SUPABASE_POLO_URL || process.env.SUPABASE_URL || ''
+  let poloHostLabel = '—'
+  try {
+    if (poloHost) poloHostLabel = new URL(poloHost).host
+  } catch { /* ignore */ }
+  console.log(`[Server] Polos: table=${poloTable} host=${poloHostLabel}`)
 }).on('error', (err) => {
   console.error('[Server] Listen error:', err.message)
 })
