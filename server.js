@@ -4,6 +4,7 @@ import { dirname, join } from 'path'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 import { runNearestPolo } from './server/locationTool.js'
 import { runInscricao } from './server/inscricaoTool.js'
+import { runDistribuirHumano } from './server/distribuirHumanoTool.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -141,6 +142,25 @@ app.post('/api/inscricao/run', async (req, res) => {
   try {
     const out = await runInscricao(process.env, req.body || {})
     if (!out.ok && (out.code === 'MISSING_CRM_FIELDS' || out.code === 'MISSING_PARAMS')) {
+      res.status(400).json(out)
+      return
+    }
+    if (!out.ok) {
+      res.status(500).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Tool distribuir_humano (Kommo + 2× Supabase + OpenAI) ──
+
+app.post('/api/distribuir-humano/run', async (req, res) => {
+  try {
+    const out = await runDistribuirHumano(process.env, req.body || {})
+    if (!out.ok && (out.code === 'MISSING_CRM_FIELDS' || out.code === 'LEAD_NOT_ELIGIBLE')) {
       res.status(400).json(out)
       return
     }

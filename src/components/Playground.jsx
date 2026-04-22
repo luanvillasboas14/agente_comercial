@@ -49,13 +49,13 @@ export default function Playground({ prompts }) {
 Você está em um ambiente de teste (Playground). As regras abaixo substituem qualquer instrução conflitante dos prompts acima:
 
 1. RESPONDA SEMPRE EM LINGUAGEM NATURAL, nunca em XML, JSON ou templates estruturados.
-2. Você tem 6 tools reais: buscar_precos, buscar_informacoes, buscar_pos, buscar_perguntas, localizacao e inscricao. USE-AS quando couber: cursos/preços/FAQ, localização e inscrição (curso + tipo de ingresso ENEM ou Vestibular Múltipla Escolha).
+2. Você tem 7 tools reais: buscar_precos, buscar_informacoes, buscar_pos, buscar_perguntas, localizacao, inscricao e distribuir_humano. USE-AS quando couber: cursos/preços/FAQ, localização, inscrição e distribuição humana (só quando as regras da tool forem atendidas — sem dados de curso para vender).
 3. Para localização, execute localizacao com o texto completo que o usuário informou (cidade, rua e número ou CEP) e apresente polo, endereço, tempo estimado e o link da rota.
 4. Para inscrição, use inscricao com curso e tipo_ingresso. Se a resposta indicar integração pendente (telefone/id_lead), explique ao usuário de forma natural que o cadastro será concluído pelo canal oficial ou pela equipe, sem citar APIs.
 5. Quando buscar preços ou informações, apresente os resultados encontrados ao usuário de forma clara e objetiva.
 6. Se a busca retornar cursos com nomes parecidos (ex: usuário pediu "Economia" e a base tem "Ciências Econômicas"), apresente os cursos encontrados e pergunte se é o que o usuário procura, em vez de dizer que não encontrou.
 7. NÃO mencione ferramentas internas, tools, agentes ou contexto técnico ao usuário.
-8. A tool distribuir_humano NÃO existe neste ambiente. Ignore instruções sobre ela.
+8. distribuir_humano exige id_lead e telefone; sem integração CRM o modelo pode explicar ao usuário que um humano dará continuidade.
 9. Seja direto, profissional e acolhedor.`
 
     return promptsText + '\n\n---\n\n' + playgroundOverride
@@ -95,6 +95,7 @@ Você está em um ambiente de teste (Playground). As regras abaixo substituem qu
         buscar_perguntas: 'Buscando na base de perguntas',
         localizacao: 'Buscando polo mais próximo (Google Maps + base de polos)',
         inscricao: 'Executando fluxo de inscrição (Kommo + Supabase)',
+        distribuir_humano: 'Distribuindo para consultor humano (Kommo + fila)',
       }
       setToolStatus(toolLabel[fn.name] || `Executando ${fn.name}...`)
 

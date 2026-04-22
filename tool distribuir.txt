@@ -1,0 +1,900 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "dados_cliente",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefone",
+              "condition": "eq",
+              "keyValue": "={{ $('When Executed by Another Workflow').item.json.telefone }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "atendimento_ia",
+              "fieldValue": "pause"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        752
+      ],
+      "id": "00e2fff2-957e-49f7-9a2b-7a63461b69e0",
+      "name": "Update a row2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e283fa3a-89d7-4de3-8691-37d41d0bf85a",
+              "name": "retorno",
+              "value": "atendimento distribuido para consultor",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2304,
+        752
+      ],
+      "id": "372d1f7a-e400-46a7-a0cb-625dec3dc4bc",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "resource": "leads",
+        "operation": "updateLeads",
+        "collection": {
+          "lead": [
+            {
+              "id": "={{ $('Edit Fields3').item.json.data._embedded.leads[0].id }}",
+              "pipeline_id": 11685120,
+              "status_id": 89820300,
+              "responsible_user_id": "={{ $('Code6').item.json.id_lead }}",
+              "custom_fields_values": {
+                "custom_field": [
+                  {
+                    "data": "{\"id\":686789,\"type\":\"select\"}",
+                    "value": "Recebida"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        752
+      ],
+      "id": "e116997c-039c-47c3-b425-8d37174db750",
+      "name": "Update leads",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "contacts",
+        "operation": "updateContacts",
+        "collection": {
+          "contact": [
+            {
+              "id": "={{ $('Edit Fields3').item.json.data._embedded.leads[0]._embedded.contacts[0].id }}",
+              "responsible_user_id": "={{ $('Code6').item.json.id_lead }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        752
+      ],
+      "id": "bacd9916-3f89-4fce-ba09-7a6911ff1862",
+      "name": "Update contacts",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data._embedded.leads[0].status_id }}",
+                    "rightValue": 89820300,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    },
+                    "id": "31970465-0401-4362-a00c-ebabea62c282"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": "="
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2b720dd3-d538-4bc0-acc3-3a4bb5bdea16",
+                    "leftValue": "={{ $json.data._embedded.leads[0].status_id }}",
+                    "rightValue": 89820304,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1360,
+        832
+      ],
+      "id": "28136af1-afd7-48fe-84ff-e84af20bc36d",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "url": "=https://admamoeduitcombr.kommo.com/api/v4/leads?\nquery={{ $json.id_lead }}&\nfilter[statuses][0][pipeline_id]=11685120&\nfilter[statuses][0][status_id]=89820300&\nfilter[statuses][1][pipeline_id]=11685120&\nfilter[statuses][1][status_id]=89820304&\nwith=contacts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "authorization",
+              "value": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjA0NWI0OWI2MTA3NTgxMTk4ZmQyZGQyNDViMDU1MzE2MWIzNjFkZmU1ZWEwMDhhNGVhYTU3YTFlYjY3MWRlMjFlMTczMmQ2MjM3M2ZiZGVmIn0.eyJhdWQiOiJlMTg0MDljOS0yZmQxLTQyY2QtOWM5YS1lYTA4ODZjMzg1MTgiLCJqdGkiOiIwNDViNDliNjEwNzU4MTE5OGZkMmRkMjQ1YjA1NTMxNjFiMzYxZGZlNWVhMDA4YTRlYWE1N2ExZWI2NzFkZTIxZTE3MzJkNjIzNzNmYmRlZiIsImlhdCI6MTc2Njc2MzQ5NCwibmJmIjoxNzY2NzYzNDk0LCJleHAiOjE4MTgwMjg4MDAsInN1YiI6IjgyNjE4MzciLCJncmFudF90eXBlIjoiIiwiYWNjb3VudF9pZCI6MzAyMTQ1NjgsImJhc2VfZG9tYWluIjoia29tbW8uY29tIiwidmVyc2lvbiI6Miwic2NvcGVzIjpbImNybSIsImZpbGVzIiwiZmlsZXNfZGVsZXRlIiwibm90aWZpY2F0aW9ucyIsInB1c2hfbm90aWZpY2F0aW9ucyJdLCJoYXNoX3V1aWQiOiJmNDRhYjcxNi01NzY2LTQ2NjctYTljMC04NmZkNGE0NmEyZWUiLCJ1c2VyX2ZsYWdzIjowLCJhcGlfZG9tYWluIjoiYXBpLWcua29tbW8uY29tIn0.jDrGDQ_PHcLOCoRmcpdjOM14OyzecBFOA58iFX-HkL3C8ADgeEg9JRBwhFfhqbqwjsc4VjPnb9jyLEb59ik5vIRDKhkNbl6KiyBaAK7v0c6QtyvFpi6yYGygJqLGJTbW_jlzlnJy_V_3MAKAyrywMdNhPVJSN8lBnbmmJH8QUirWzfcSJIBuMdAn9T7jYpcZkwQWNvfr5E_YDSZd_bYyY8gIXI0s7vC-GuHhVPun4yQ4n81duNwU1BnU81Eq4V8v6qXAithTid0jm9b4jXP_7sxnIT3478Qh7WXznKopewAP1pafOQmyf-qQ71_jf5g7F7Crk0HkTMYI8z-OC1lNfw"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1808,
+        848
+      ],
+      "id": "65016719-5251-4190-9465-398a590cdef1",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a34904d7-386d-431c-960b-94fa85be51b0",
+              "name": "data",
+              "value": "={{ $json.data }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1584,
+        848
+      ],
+      "id": "8377a4ea-5721-4ccd-abd8-41d73f5b3a7b",
+      "name": "Edit Fields3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        944
+      ],
+      "id": "63a55c21-0b98-4d4a-9094-f821e1051561",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "chat_messages",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "phone",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefone }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        272,
+        752
+      ],
+      "id": "8265efb6-74b3-45e1-bdf9-f790fde8d917",
+      "name": "Get many rows2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ordena por created_at ASC e formata o histórico\nconst sorted = items.sort((a, b) => \n  new Date(a.json.created_at) - new Date(b.json.created_at)\n);\n\nconst conversation = sorted.map(row => {\n  const userMsg = row.json.user_message ? `Usuário: ${row.json.user_message}` : '';\n  const botMsg = row.json.bot_message ? `Bot: ${row.json.bot_message}` : '';\n  return [userMsg, botMsg].filter(Boolean).join('\\n');\n}).join('\\n\\n');\n\nreturn [{ json: { conversation } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        752
+      ],
+      "id": "e41193ad-f853-40cf-a081-a917ce9d2a64",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Prompt para Agente de Resumo de Conversas\nVocê é um assistente especializado em resumir conversas do WhatsApp entre o assistente virtual comercial da Cruzeiro do Sul e candidatos.\n\nSua Tarefa\nAnalise a conversa completa abaixo e crie um resumo estruturado:\n{{$json.conversation}}\n\nInformações para Identificar\nINSTRUÇÕES CRÍTICAS DE ANÁLISE:\n\nLeia TODA a conversa linha por linha antes de fazer o resumo\nExtraia informações REAIS que aparecem nas mensagens, não invente ou generalize\nSe o candidato mencionar seu nome em qualquer momento, capture-o\nSe o candidato perguntar sobre um curso específico, identifique qual curso\nSe o candidato perguntar sobre valores, isso indica interesse claro\nNUNCA invente nomes de candidatos - use APENAS o nome que o próprio candidato informou explicitamente\nNUNCA assuma informações que não foram trocadas - se o assistente não respondeu ainda, informe isso claramente\nIdentifique quem falou o quê - diferencie mensagens do candidato (Fatima aparecida silva) das mensagens do assistente/robô\nO que procurar:\n\nNome do candidato: Qualquer menção ao nome (completo ou primeiro nome) nas mensagens do candidato ou quando o assistente se dirige ao candidato\nNível de interesse: Baseado no tipo de curso mencionado (graduação, pós-graduação)\nCurso específico: Nome exato do curso que o candidato perguntou ou demonstrou interesse\nInformações fornecidas: Valores específicos, prazos, links, documentos, detalhes de inscrição que o assistente compartilhou\nPerguntas do candidato: O que especificamente o candidato quis saber\nStatus: Se o candidato ainda está respondendo ou parou de responder\nREGRA CRÍTICA PARA CONVERSAS SEM RESPOSTA DO ASSISTENTE:\n\nSe o assistente NÃO respondeu às perguntas do candidato ainda, você DEVE informar: \"O assistente ainda não respondeu ao candidato\"\nSe o candidato apenas enviou uma pergunta e não houve troca de mensagens, informe: \"Não houve troca de mensagens ainda. O candidato perguntou sobre [assunto]\"\nNÃO invente informações que não foram fornecidas pelo assistente\nClassificação de Níveis\nGraduação: Bacharelado, licenciatura, tecnólogo (ex: Administração, Engenharia, Direito, Psicologia, Enfermagem)\nPós-graduação: MBA, especialização, mestrado, doutorado\nNão informado: Quando não fica claro o nível de interesse\nFormato de Resposta Obrigatório\nResumo: [2-6 frases descrevendo o que REALMENTE aconteceu na conversa com base nas mensagens trocadas. Inclua o nome se foi mencionado, o curso específico sobre o qual perguntaram, e as principais informações fornecidas. Seja específico e factual. Se não houve resposta do assistente, informe isso claramente.] Nome do candidato: [Nome identificado na conversa ou \"Não informado\"] Nível: [Graduação/Pós-graduação/Não informado] Curso: [Nome exato do curso mencionado na conversa ou \"Não informado\"] Informações fornecidas pela IA: [Liste especificamente o que a IA compartilhou: valores mencionados, links enviados, documentos solicitados, prazos informados, etc. Se a IA não respondeu ainda, escreva: \"Nenhuma informação fornecida ainda - aguardando resposta do assistente\"] Status da conversa: [Candidato respondeu/Candidato parou de responder/Aguardando resposta do assistente]\nIMPORTANTE:\n\nResponda APENAS no formato acima, sem repetir estas instruções\nBase seu resumo EXCLUSIVAMENTE no conteúdo real das mensagens\nNÃO generalize dizendo \"candidato demonstrou interesse em cursos\" se ele perguntou sobre um curso específico\nNÃO diga \"não teve o nome mencionado\" se o nome aparece na conversa\nSeja preciso e específico com as informações que realmente foram trocadas\nNUNCA invente nomes, valores, ou informações que não aparecem explicitamente nas mensagens\nSe o assistente não respondeu, deixe claro que não houve resposta ainda\n",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        928,
+        752
+      ],
+      "id": "94b3c24a-7b15-4c6c-8150-976b1f6449bd",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        944,
+        976
+      ],
+      "id": "45a9a055-ec03-46af-bbb8-38ec4333677f",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "notes",
+        "operation": "createNotes",
+        "notes": {
+          "common": [
+            {
+              "entity_id": "={{ $('Update leads').first().json._embedded.leads[0].id }}",
+              "text": "={{ $json.resumo }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        752
+      ],
+      "id": "455a1e17-a643-495d-ab89-52a1203b42b2",
+      "name": "Create new notes1",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Entrada: items do nó anterior (Supabase)\nconst rows = items;\n\n// ===== Config =====\nconst DEFAULT_TOP_N = 5;\nconst TOP_N = Number(items?.[0]?.json?.TOP_N) > 0 ? Number(items[0].json.TOP_N) : DEFAULT_TOP_N;\n\n// ===== Helpers =====\nconst normNome = (v) => (v ?? \"\").trim().toLowerCase();\nconst getKey = (j) => j.id_lead ?? normNome(j.nome ?? j.Nome); // chave do consultor\nconst getTs = (j) => {\n  const s = j.ultimo_lead ?? j[\"Ultimo Lead\"] ?? j.ultimoLead;\n  const t = Date.parse(s);\n  return isNaN(t) ? Number.NEGATIVE_INFINITY : t; // sem/ruim => mais antigo\n};\n\n// ===== Dedup por consultor, mantendo o MAIS ANTIGO ultimo_lead =====\nconst byConsultor = new Map();\n/*\n Estrutura: key -> { idx, item, ts }\n Mantém aquele com ts MENOR (mais antigo) para representar o consultor.\n*/\nfor (let i = 0; i < rows.length; i++) {\n  const r = rows[i];\n  const j = r.json;\n\n  const keyRaw = getKey(j);\n  const key = (keyRaw == null || keyRaw === \"\") ? `__sem_chave_${i}` : String(keyRaw);\n\n  const ts = getTs(j);\n\n  const cur = byConsultor.get(key);\n  if (!cur || ts < cur.ts) {\n    byConsultor.set(key, { idx: i, item: r, ts });\n  }\n}\n\nconst unicos = Array.from(byConsultor.values());\n\nif (unicos.length === 0) {\n  throw new Error(\"Nenhum consultor disponível para distribuição.\");\n}\n\n// ===== Ordenar do mais antigo -> mais recente =====\nunicos.sort((a, b) => a.ts - b.ts);\n\n// ===== Selecionar pool e sortear =====\nconst take = Math.min(TOP_N, unicos.length);\nconst candidatos = unicos.slice(0, take);\n\n// Sorteio uniforme\nconst escolhido = candidatos[Math.floor(Math.random() * candidatos.length)];\n\n// ===== Retorno preservando o índice original para pairedItem =====\nreturn [\n  {\n    json: escolhido.item.json,\n    pairedItem: { item: escolhido.idx },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        752
+      ],
+      "id": "98cac1c8-d043-4a94-97ad-9d6de6c88896",
+      "name": "Code6"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "distrib_comercial",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "ATIVO"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        752
+      ],
+      "id": "3c0a061e-29df-4fd4-9a63-cbd6d233e10c",
+      "name": "Get many rows3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "71OBWtC8t38iEtPO",
+          "name": "Supabase Academico"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "distrib_comercial",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "ultimo_lead",
+              "fieldValue": "={{ new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        752
+      ],
+      "id": "7983d5ec-72c4-4a38-b734-856e9aea2fc6",
+      "name": "Update a row3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "71OBWtC8t38iEtPO",
+          "name": "Supabase Academico"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "id_lead"
+            },
+            {
+              "name": "telefone"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2032,
+        848
+      ],
+      "id": "80777684-2519-4349-ad44-6fa42349b028",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node Code para N8N - Extrator de campos do resumo (robusto)\n// Funciona com labels como \"Resumo:\" ou \"**Resumo:**\" e pega multilinhas até o próximo label.\nfunction escapeRegex(s) {\n  return s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n\nconst items = $input.all();\n\nconst labels = [\n  'Resumo',\n  'Nome do candidato',\n  'Nível',\n  'Curso',\n  'Informações fornecidas pela IA',\n  'Status da conversa'\n];\n\nconst results = items.map(item => {\n  const inputText = (item.json && (item.json.text || item.json.body || item.json.input)) || '';\n  if (!inputText) {\n    return {\n      json: {\n        resumo: '',\n        nome_candidato: '',\n        nivel: '',\n        curso: '',\n        informacoes_ia: '',\n        status_conversa: '',\n        texto_original: inputText\n      }\n    };\n  }\n\n  // Encontra posições dos labels (suporta com ou sem **)\n  const positions = [];\n  for (const label of labels) {\n    const regex = new RegExp(`\\\\*{0,2}\\\\s*${escapeRegex(label)}\\\\s*\\\\*{0,2}\\\\s*:`, 'i');\n    const m = regex.exec(inputText);\n    if (m) {\n      positions.push({ label, idx: m.index, length: m[0].length });\n    }\n  }\n\n  // Se nenhum label foi encontrado, retorna vazio mas mantém texto original\n  if (positions.length === 0) {\n    return {\n      json: {\n        resumo: '',\n        nome_candidato: '',\n        nivel: '',\n        curso: '',\n        informacoes_ia: '',\n        status_conversa: '',\n        texto_original: inputText\n      }\n    };\n  }\n\n  // Ordena por posição no texto\n  positions.sort((a, b) => a.idx - b.idx);\n\n  // Extrai valores entre cada label e o próximo label (ou fim do texto)\n  const extracted = {};\n  for (let i = 0; i < positions.length; i++) {\n    const start = positions[i].idx + positions[i].length;\n    const end = (i + 1 < positions.length) ? positions[i + 1].idx : inputText.length;\n    // Mantém linhas, mas limpa espaços extras\n    const value = inputText.slice(start, end).trim().replace(/\\s+\\n\\s+/g, '\\n').replace(/\\s{2,}/g, ' ');\n    extracted[positions[i].label] = value;\n  }\n\n  return {\n    json: {\n      resumo: extracted['Resumo'] || '',\n      nome_candidato: extracted['Nome do candidato'] || '',\n      nivel: extracted['Nível'] || '',\n      curso: extracted['Curso'] || '',\n      informacoes_ia: extracted['Informações fornecidas pela IA'] || '',\n      status_conversa: extracted['Status da conversa'] || '',\n      texto_original: inputText\n    }\n  };\n});\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        752
+      ],
+      "id": "88e86074-5a23-49b0-a7f0-770dd2de4e6c",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "resource": "leads",
+        "operation": "updateLeads",
+        "collection": {
+          "lead": [
+            {
+              "id": "={{ $('Edit Fields3').all()[0].json.data._embedded.leads[0].id }}",
+              "pipeline_id": 5481944,
+              "status_id": "={{ 74941508 }}",
+              "custom_fields_values": {
+                "custom_field": [
+                  {
+                    "data": "{\"id\":31782,\"type\":\"text\"}",
+                    "value": "={{ $('Code').item.json.curso }}"
+                  },
+                  {
+                    "data": "{\"id\":31786,\"type\":\"text\"}",
+                    "value": "={{ $('Code').item.json.nivel }}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        752
+      ],
+      "id": "7daa7b36-289c-4909-925c-cd011e49169e",
+      "name": "Update leads1",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        752
+      ],
+      "id": "324f937a-ee8c-4d32-bcb6-6e910a99c4ba",
+      "name": "Wait",
+      "webhookId": "42696f6e-71a5-4891-a28a-2882ba1e1ebd"
+    },
+    {
+      "parameters": {
+        "tableId": "distribuicao_por_consultor",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_lead",
+              "fieldValue": "={{ $('Edit Fields3').item.json.data._embedded.leads[0].id }}"
+            },
+            {
+              "fieldId": "consultor",
+              "fieldValue": "={{ $json.nome }}"
+            },
+            {
+              "fieldId": "timestamp",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        752
+      ],
+      "id": "ea1cf369-4a5b-4788-84cf-4c3ad96e9f26",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "distribuicao_por_consultor",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id_lead",
+              "condition": "eq",
+              "keyValue": "={{ $('When Executed by Another Workflow').item.json.id_lead }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id_lead",
+              "fieldValue": "={{ $('When Executed by Another Workflow').item.json.id_lead }}"
+            },
+            {
+              "fieldId": "consultor",
+              "fieldValue": "={{ $('Update a row3').first().json.nome }}"
+            },
+            {
+              "fieldId": "timestamp",
+              "fieldValue": "={{ $now }}"
+            },
+            {
+              "fieldId": "origem",
+              "fieldValue": "=whatsapp"
+            },
+            {
+              "fieldId": "id_consultor",
+              "fieldValue": "={{ $('Code6').item.json.id_lead }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $json.telefone_formatado }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        752
+      ],
+      "id": "eabe6160-f03e-450b-afaf-3d9aad3541b6",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "PHQl6oEaPqgLjGGZ",
+          "name": "BANCO - AGENTE COMERCIAL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const telefoneOriginal = $('When Executed by Another Workflow').first().json.telefone || '';\n\n// pega só números\nlet telefone = String(telefoneOriginal).replace(/\\D/g, '');\n\n// remove o 55 do começo, se existir\nif (telefone.startsWith('55') && telefone.length > 11) {\n  telefone = telefone.slice(2);\n}\n\nreturn [\n  {\n    json: {\n      telefone_original: telefoneOriginal,\n      telefone_formatado: telefone\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        752
+      ],
+      "id": "debed8ed-b595-494a-91ed-083201a33015",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "connections": {
+    "Update a row2": {
+      "main": [
+        [
+          {
+            "node": "Get many rows2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update leads": {
+      "main": [
+        [
+          {
+            "node": "Update contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update contacts": {
+      "main": [
+        [
+          {
+            "node": "Update a row2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Get many rows3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get many rows3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows2": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create new notes1": {
+      "main": [
+        [
+          {
+            "node": "Update leads1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code6": {
+      "main": [
+        [
+          {
+            "node": "Update a row3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows3": {
+      "main": [
+        [
+          {
+            "node": "Code6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row3": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Create new notes1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update leads1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Update leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "id_lead": 20729145,
+        "telefone": "5511939405038@s.whatsapp.net"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}

@@ -140,6 +140,38 @@ export async function executarInscricao(args) {
   return `Inscrição não executada: ${data.error || data.message || data.code || `HTTP ${res.status}`}`
 }
 
+/** Tool distribuir_humano — fila de consultor (Kommo + distrib_comercial + resumo). */
+export async function executarDistribuirHumano(args) {
+  const res = await fetch('/api/distribuir-humano/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id_lead: args.id_lead ?? args.idLead,
+      telefone: args.telefone,
+    }),
+  })
+  let data
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error('Resposta inválida da API de distribuição')
+  }
+  if (data.ok) {
+    const lines = [
+      data.retorno || 'Distribuição concluída.',
+      data.consultor ? `Consultor: ${data.consultor}` : null,
+      data.id_consultor != null ? `ID consultor (Kommo): ${data.id_consultor}` : null,
+    ].filter(Boolean)
+    if (data.resumo_campos?.resumo) lines.push(`Resumo: ${data.resumo_campos.resumo}`)
+    if (data.warnings?.length) lines.push(`Avisos: ${data.warnings.join(' | ')}`)
+    return lines.join('\n')
+  }
+  if (data.code === 'MISSING_CRM_FIELDS' && data.message) return data.message
+  if (data.code === 'LEAD_NOT_ELIGIBLE' && data.message) return data.message
+  if (data.code === 'DIST_COMERCIAL_NOT_CONFIGURED') return data.error
+  return `Distribuição não executada: ${data.error || data.message || data.code || `HTTP ${res.status}`}`
+}
+
 export const TOOL_DEFINITIONS = [
   {
     type: 'function',
@@ -267,6 +299,30 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'distribuir_humano',
+      description:
+        '⚠️ SÓ USAR SE o contexto/RAG indicar distribuir_humano ou ausência de resultado de curso (RAG_SEM_RESULTADO). ' +
+        '❌ NUNCA usar se houver dados de curso para vender (preço, grade, etc.): quando tem dados = vender, não distribuir. ' +
+        'Encaminha o lead para um consultor humano: exige id_lead e telefone no CRM; o lead deve estar nas etapas corretas do funil de distribuição.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id_lead: {
+            type: 'integer',
+            description: 'ID do lead no Kommo.',
+          },
+          telefone: {
+            type: 'string',
+            description: 'Telefone/WhatsApp do lead (mesmo formato usado no CRM ou chat).',
+          },
+        },
+        required: ['id_lead', 'telefone'],
+      },
+    },
+  },
 ]
 
 export const TOOL_EXECUTORS = {
@@ -276,4 +332,5 @@ export const TOOL_EXECUTORS = {
   buscar_perguntas: (args, apiKey) => buscarPerguntas(args.query, apiKey),
   localizacao: (args) => executarLocalizacao(args),
   inscricao: (args) => executarInscricao(args),
+  distribuir_humano: (args) => executarDistribuirHumano(args),
 }

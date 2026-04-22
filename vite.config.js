@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 import { runNearestPolo } from './server/locationTool.js'
 import { runInscricao } from './server/inscricaoTool.js'
+import { runDistribuirHumano } from './server/distribuirHumanoTool.js'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -15,6 +16,7 @@ export default defineConfig(({ mode }) => {
       feedbackJobPlugin(env),
       locationApiPlugin(env),
       inscricaoApiPlugin(env),
+      distribuirHumanoApiPlugin(env),
     ],
     build: { outDir: 'dist' },
   }
@@ -73,6 +75,41 @@ function inscricaoApiPlugin(env) {
             const out = await runInscricao(env, body)
             const badInput =
               out.ok === false && (out.code === 'MISSING_CRM_FIELDS' || out.code === 'MISSING_PARAMS')
+            const code = out.ok ? 200 : badInput ? 400 : 500
+            res.writeHead(code, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(out))
+          } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+        })
+      })
+    },
+  }
+}
+
+function distribuirHumanoApiPlugin(env) {
+  return {
+    name: 'distribuir-humano-api',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const path = req.url?.split('?')[0] || ''
+        if (path !== '/api/distribuir-humano/run') return next()
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Use POST' }))
+          return
+        }
+        const chunks = []
+        req.on('data', (c) => chunks.push(c))
+        req.on('end', async () => {
+          try {
+            const raw = Buffer.concat(chunks).toString()
+            const body = raw ? JSON.parse(raw) : {}
+            const out = await runDistribuirHumano(env, body)
+            const badInput =
+              out.ok === false &&
+              (out.code === 'MISSING_CRM_FIELDS' || out.code === 'LEAD_NOT_ELIGIBLE')
             const code = out.ok ? 200 : badInput ? 400 : 500
             res.writeHead(code, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(out))
