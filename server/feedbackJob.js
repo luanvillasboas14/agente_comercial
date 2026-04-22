@@ -61,6 +61,7 @@ export async function getFeedbackJobPreview(env) {
     SUPABASE_URL_FEEDBACK, SUPABASE_KEY_FEEDBACK,
     FEEDBACK_JOB_WINDOW_MINUTES = '90',
     FEEDBACK_JOB_BUFFER_MINUTES = '30',
+    FEEDBACK_JOB_MAX_WINDOW_MINUTES = '0',
   } = env
   if (!SUPABASE_URL_FEEDBACK || !SUPABASE_KEY_FEEDBACK) {
     return { error: 'feedback supabase não configurado' }
@@ -71,6 +72,7 @@ export async function getFeedbackJobPreview(env) {
     sb,
     Number(FEEDBACK_JOB_WINDOW_MINUTES),
     Number(FEEDBACK_JOB_BUFFER_MINUTES),
+    Number(FEEDBACK_JOB_MAX_WINDOW_MINUTES) || 0,
   )
 
   let pendingCount = null
@@ -156,38 +158,78 @@ async function fetchRecentMessages(sb, sinceIso) {
   return all
 }
 
-// Calcula a janela adaptativa:
-// - buffer constante = BUFFER_MINUTES (ex: 30min) antes do último run
-// - se não houver run anterior, usa windowMinutes (ex: 90min padrão)
-// - garante no mínimo windowMinutes de janela mesmo que o último run tenha acabado agora
-export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinutes) {
+/** Lê o "até quando" a última execução buscou mensagens (para avançar a janela e não re-ler tudo). */
+function extractFetchUntilFromRun(row) {
+  if (!row) return null
+  const steps = row.steps
+  if (!Array.isArray(steps)) return row.started_at || null
+  const w = steps.find((s) => s.type === 'window_info')
+  if (w?.until) return w.until
+  // Runs antigos sem campo until: until ≈ instante do fetch (= início do run)
+  return row.started_at || row.finished_at || null
+}
+
+// Janela adaptativa:
+// - Depois da 1ª execução com metadados: since = (until da execução anterior) − buffer (sobreposição)
+//   → evita refetch massivo das mesmas mensagens a cada hora.
+// - Sem histórico / legado: since = now − defaultWindowMinutes (cold start).
+// - Opcional: FEEDBACK_JOB_MAX_WINDOW_MINUTES limita o tamanho da janela (backlog após muito tempo parado).
+export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinutes, maxWindowMinutes = 0) {
   const now = new Date()
   const minSince = new Date(now.getTime() - defaultWindowMinutes * 60 * 1000)
 
-  // Pega o último run anterior (success ou error - ignora ainda-running)
+  let lastUntilIso = null
   let lastStartIso = null
   try {
     const rows = await sb.select(
       'feedback_job_runs',
-      `select=started_at,status,finished_at&status=in.(success,error)&order=started_at.desc&limit=1`,
+      `select=steps,started_at,finished_at&status=in.(success,error)&order=started_at.desc&limit=15`,
     )
-    lastStartIso = rows?.[0]?.started_at || null
+    for (const row of rows || []) {
+      const u = extractFetchUntilFromRun(row)
+      if (u) {
+        lastUntilIso = u
+        lastStartIso = row.started_at || null
+        break
+      }
+    }
   } catch {
-    lastStartIso = null
+    lastUntilIso = null
   }
 
-  let since = minSince
-  let basedOn = 'default_window'
+  let since
+  let basedOn
   let extraMinutes = 0
 
-  if (lastStartIso) {
-    const lastStart = new Date(lastStartIso)
-    const candidate = new Date(lastStart.getTime() - bufferMinutes * 60 * 1000)
-    if (candidate < minSince) {
-      since = candidate
-      basedOn = 'last_run_started_at'
-      const elapsed = Math.round((now.getTime() - lastStart.getTime()) / 60000)
-      extraMinutes = Math.max(0, elapsed - 60)
+  if (lastUntilIso) {
+    const lastUntil = new Date(lastUntilIso)
+    since = new Date(lastUntil.getTime() - bufferMinutes * 60 * 1000)
+    basedOn = 'after_previous_fetch_until'
+    if (lastStartIso) {
+      const lastStart = new Date(lastStartIso)
+      extraMinutes = Math.max(0, Math.round((now.getTime() - lastStart.getTime()) / 60000) - 60)
+    }
+  } else {
+    since = minSince
+    basedOn = 'cold_start'
+  }
+
+  if (since > now) {
+    since = new Date(now.getTime() - 5 * 60 * 1000)
+    basedOn = `${basedOn}_since_clamped`
+  }
+
+  const minWidthMs = 2 * 60 * 1000
+  if (now.getTime() - since.getTime() < minWidthMs) {
+    since = minSince
+    basedOn = `${basedOn}_min_width`
+  }
+
+  if (maxWindowMinutes > 0) {
+    const capSince = new Date(now.getTime() - maxWindowMinutes * 60 * 1000)
+    if (since.getTime() < capSince.getTime()) {
+      since = capSince
+      basedOn = `${basedOn}_max_window_cap`
     }
   }
 
@@ -198,6 +240,7 @@ export async function computeAdaptiveWindow(sb, defaultWindowMinutes, bufferMinu
     window_minutes: windowMinutes,
     based_on: basedOn,
     extra_minutes_over_hour: extraMinutes,
+    last_fetch_until: lastUntilIso,
     last_run_started_at: lastStartIso,
   }
 }
@@ -1016,6 +1059,7 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     SUPABASE_URL_FEEDBACK, SUPABASE_KEY_FEEDBACK, OPENAI_API_KEY,
     FEEDBACK_JOB_WINDOW_MINUTES = '90',
     FEEDBACK_JOB_BUFFER_MINUTES = '30',
+    FEEDBACK_JOB_MAX_WINDOW_MINUTES = '0',
   } = env
 
   if (!SUPABASE_URL_FEEDBACK || !SUPABASE_KEY_FEEDBACK) {
@@ -1033,6 +1077,7 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     sb,
     Number(FEEDBACK_JOB_WINDOW_MINUTES),
     Number(FEEDBACK_JOB_BUFFER_MINUTES),
+    Number(FEEDBACK_JOB_MAX_WINDOW_MINUTES) || 0,
   )
 
   // Cria registro inicial
@@ -1133,14 +1178,16 @@ export async function runFeedbackJob(env, trigger = 'cron') {
   const finishedAt = new Date()
   const durationMs = finishedAt.getTime() - startedAt.getTime()
 
-  // Acrescenta resumo da janela ao final do steps (ajuda a inspecionar depois)
+  // Resumo da janela (until permite a próxima execução continuar sem re-lêr o mesmo período)
   steps.unshift({
     type: 'window_info',
     at: startedAt.toISOString(),
-    window_minutes: windowInfo.window_minutes,
     since: windowInfo.sinceIso,
+    until: windowInfo.untilIso,
+    window_minutes: windowInfo.window_minutes,
     based_on: windowInfo.based_on,
     extra_minutes_over_hour: windowInfo.extra_minutes_over_hour,
+    last_fetch_until: windowInfo.last_fetch_until,
     last_run_started_at: windowInfo.last_run_started_at,
   })
 

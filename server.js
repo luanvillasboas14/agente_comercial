@@ -148,7 +148,12 @@ app.listen(PORT, () => {
   console.log(`[Server] Supabase proxy (Feedback): ${SUPABASE_URL_FEEDBACK ? 'active' : 'DISABLED'}`)
   console.log(`[Server] Location tool (Google Maps): ${maps ? 'active' : 'DISABLED'}`)
   const poloTable = process.env.SUPABASE_POLO_TABLE || process.env.POLO_LOC_TABLE || 'polo_loc'
-  const poloHost = process.env.SUPABASE_POLO_URL || process.env.SUPABASE_URL || ''
+  const poloHost =
+    process.env.SUPABASE_POLO_URL ||
+    process.env.SUPABASE_URL_FEEDBACK ||
+    process.env.VITE_SUPABASE_URL_FEEDBACK ||
+    process.env.SUPABASE_URL ||
+    ''
   let poloHostLabel = '—'
   try {
     if (poloHost) poloHostLabel = new URL(poloHost).host

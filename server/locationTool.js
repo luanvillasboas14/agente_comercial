@@ -1,10 +1,12 @@
 /**
- * Tool "localizacao" — geocode + tabela de polos no Supabase + Haversine + Distance Matrix.
+ * Tool "localizacao" — geocode + tabela de polos + Haversine + Distance Matrix.
  * Env:
  *   GOOGLE_MAPS_API_KEY
- *   SUPABASE_URL + SUPABASE_KEY (padrão para ler polos)
- *   SUPABASE_POLO_URL + SUPABASE_POLO_KEY (opcional — outro projeto, ex. "Academico")
- *   SUPABASE_POLO_TABLE (opcional, default polo_loc) — nome exato da tabela no Table Editor
+ *   Polos no Supabase (ordem de fallback):
+ *     SUPABASE_POLO_URL + SUPABASE_POLO_KEY (opcional, força outro projeto)
+ *     SUPABASE_URL_FEEDBACK + SUPABASE_KEY_FEEDBACK (padrão — mesmo projeto do feedback, tabela polo_loc)
+ *     SUPABASE_URL + SUPABASE_KEY (IA)
+ *   SUPABASE_POLO_TABLE (opcional, default polo_loc)
  */
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -147,9 +149,18 @@ function pickBestFromMatrix(matrixJson, polos, originFormatted, travelMode = 'tr
  */
 export async function runNearestPolo(env, body) {
   const mapsKey = env.GOOGLE_MAPS_API_KEY || env.VITE_GOOGLE_MAPS_API_KEY
-  // Polos: podem estar no mesmo projeto da IA ou em outro (ex.: "Supabase Academico" do N8N)
-  const poloUrl = env.SUPABASE_POLO_URL || env.SUPABASE_URL || env.VITE_SUPABASE_URL
-  const poloKey = env.SUPABASE_POLO_KEY || env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
+  const poloUrl =
+    env.SUPABASE_POLO_URL ||
+    env.SUPABASE_URL_FEEDBACK ||
+    env.VITE_SUPABASE_URL_FEEDBACK ||
+    env.SUPABASE_URL ||
+    env.VITE_SUPABASE_URL
+  const poloKey =
+    env.SUPABASE_POLO_KEY ||
+    env.SUPABASE_KEY_FEEDBACK ||
+    env.VITE_SUPABASE_KEY_FEEDBACK ||
+    env.SUPABASE_KEY ||
+    env.VITE_SUPABASE_KEY
   const poloTable = String(env.SUPABASE_POLO_TABLE || env.POLO_LOC_TABLE || 'polo_loc').trim()
 
   const localizacao = String(body?.localizacao || body?.localização || '').trim()
@@ -160,7 +171,12 @@ export async function runNearestPolo(env, body) {
     return { ok: false, error: 'GOOGLE_MAPS_API_KEY não configurada no servidor.' }
   }
   if (!poloUrl || !poloKey) {
-    return { ok: false, error: 'SUPABASE_URL / SUPABASE_KEY (ou SUPABASE_POLO_*) não configurados.' }
+    return {
+      ok: false,
+      error:
+        'Credenciais Supabase para polos não configuradas. ' +
+        'Use SUPABASE_URL_FEEDBACK / SUPABASE_KEY_FEEDBACK (ou SUPABASE_POLO_URL / SUPABASE_POLO_KEY).',
+    }
   }
 
   const geo = await googleGeocode(localizacao, mapsKey)
