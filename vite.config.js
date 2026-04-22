@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 import { runNearestPolo } from './server/locationTool.js'
+import { runInscricao } from './server/inscricaoTool.js'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -13,6 +14,7 @@ export default defineConfig(({ mode }) => {
       supabaseProxyPlugin('/api/feedback-supabase', env.SUPABASE_URL_FEEDBACK || env.VITE_SUPABASE_URL_FEEDBACK, env.SUPABASE_KEY_FEEDBACK || env.VITE_SUPABASE_KEY_FEEDBACK),
       feedbackJobPlugin(env),
       locationApiPlugin(env),
+      inscricaoApiPlugin(env),
     ],
     build: { outDir: 'dist' },
   }
@@ -38,6 +40,40 @@ function locationApiPlugin(env) {
             const body = raw ? JSON.parse(raw) : {}
             const out = await runNearestPolo(env, body)
             const code = out.ok ? 200 : 400
+            res.writeHead(code, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(out))
+          } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: e.message }))
+          }
+        })
+      })
+    },
+  }
+}
+
+function inscricaoApiPlugin(env) {
+  return {
+    name: 'inscricao-api',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const path = req.url?.split('?')[0] || ''
+        if (path !== '/api/inscricao/run') return next()
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: 'Use POST' }))
+          return
+        }
+        const chunks = []
+        req.on('data', (c) => chunks.push(c))
+        req.on('end', async () => {
+          try {
+            const raw = Buffer.concat(chunks).toString()
+            const body = raw ? JSON.parse(raw) : {}
+            const out = await runInscricao(env, body)
+            const badInput =
+              out.ok === false && (out.code === 'MISSING_CRM_FIELDS' || out.code === 'MISSING_PARAMS')
+            const code = out.ok ? 200 : badInput ? 400 : 500
             res.writeHead(code, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(out))
           } catch (e) {

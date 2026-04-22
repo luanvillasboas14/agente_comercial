@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 import { runNearestPolo } from './server/locationTool.js'
+import { runInscricao } from './server/inscricaoTool.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -126,6 +127,25 @@ app.post('/api/location/nearest-polo', async (req, res) => {
     const out = await runNearestPolo(process.env, req.body || {})
     if (!out.ok) {
       res.status(400).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Tool inscrição (Kommo + Supabase + OpenAI) ──
+
+app.post('/api/inscricao/run', async (req, res) => {
+  try {
+    const out = await runInscricao(process.env, req.body || {})
+    if (!out.ok && (out.code === 'MISSING_CRM_FIELDS' || out.code === 'MISSING_PARAMS')) {
+      res.status(400).json(out)
+      return
+    }
+    if (!out.ok) {
+      res.status(500).json(out)
       return
     }
     res.json(out)

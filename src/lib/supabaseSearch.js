@@ -101,6 +101,45 @@ export async function executarLocalizacao(args) {
   return lines.join('\n')
 }
 
+/** Tool inscrição — Kommo + Supabase + resumo (servidor). telefone/id_lead opcionais até integração CRM. */
+export async function executarInscricao(args) {
+  const body = {
+    curso: args.curso ?? args.Curso,
+    tipo_ingresso: args.tipo_ingresso ?? args.tipoIngresso ?? args['Tipo de ingresso'],
+    telefone: args.telefone,
+    id_lead: args.id_lead ?? args.idLead,
+  }
+  const res = await fetch('/api/inscricao/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  let data
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error('Resposta inválida da API de inscrição')
+  }
+  if (data.ok) {
+    const lines = [
+      data.retorno || 'Inscrição processada.',
+      `Curso: ${data.curso}`,
+      `Tipo de ingresso: ${data.tipo_ingresso}`,
+    ]
+    if (data.destino === 'aguardando_inscricao') lines.push('Destino no CRM: Aguardando Inscrição.')
+    if (data.destino === 'atendimento') lines.push('Destino no CRM: atendimento (consultor).')
+    if (data.missing_fields?.length) {
+      lines.push(`Pendências na nota: ${data.missing_fields.join(', ')}`)
+    }
+    if (data.resumo_campos?.resumo) lines.push(`Resumo: ${data.resumo_campos.resumo}`)
+    if (data.warnings?.length) lines.push(`Avisos: ${data.warnings.join(' | ')}`)
+    return lines.join('\n')
+  }
+  if (data.code === 'MISSING_CRM_FIELDS' && data.message) return data.message
+  if (data.code === 'MISSING_PARAMS') return data.error || 'Informe curso e tipo de ingresso (ENEM ou Vestibular Múltipla Escolha).'
+  return `Inscrição não executada: ${data.error || data.message || data.code || `HTTP ${res.status}`}`
+}
+
 export const TOOL_DEFINITIONS = [
   {
     type: 'function',
@@ -194,6 +233,40 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'inscricao',
+      description:
+        'Dispara o fluxo de inscrição no WhatsApp (template e integração Kommo/Supabase), com curso e tipo de ingresso. ' +
+        'Use quando o interessado confirmar inscrição ou pedir para seguir com a matrícula/inscrição. ' +
+        'Tipo de ingresso: ENEM ou Vestibular Múltipla Escolha. ' +
+        'telefone e id_lead são opcionais no playground até a integração com o CRM; sem eles o servidor retorna aviso de integração pendente.',
+      parameters: {
+        type: 'object',
+        properties: {
+          curso: {
+            type: 'string',
+            description: 'Nome do curso desejado pelo interessado.',
+          },
+          tipo_ingresso: {
+            type: 'string',
+            enum: ['ENEM', 'Vestibular Múltipla Escolha'],
+            description: 'Prova de ingresso: ENEM ou Vestibular Múltipla Escolha.',
+          },
+          telefone: {
+            type: 'string',
+            description: 'Telefone do lead (WhatsApp); opcional até integração.',
+          },
+          id_lead: {
+            type: 'integer',
+            description: 'ID do lead no Kommo; opcional até integração.',
+          },
+        },
+        required: ['curso', 'tipo_ingresso'],
+      },
+    },
+  },
 ]
 
 export const TOOL_EXECUTORS = {
@@ -202,4 +275,5 @@ export const TOOL_EXECUTORS = {
   buscar_pos: (args, apiKey) => buscarPos(args.query, apiKey),
   buscar_perguntas: (args, apiKey) => buscarPerguntas(args.query, apiKey),
   localizacao: (args) => executarLocalizacao(args),
+  inscricao: (args) => executarInscricao(args),
 }

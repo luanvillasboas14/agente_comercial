@@ -18,6 +18,8 @@ const TOPIC_LABELS = {
   buscar_informacoes: 'Pediu informações do curso',
   buscar_pos: 'Pediu pós-graduação',
   buscar_perguntas: 'Fez uma pergunta (FAQ)',
+  localizacao: 'Pediu polo / localização',
+  inscricao: 'Inscrição / matrícula',
 }
 
 const TOPIC_COLORS = {
@@ -285,6 +287,8 @@ export default function Dashboard() {
       buscar_informacoes: 'Buscar Informações',
       buscar_pos: 'Buscar Pós-Graduação',
       buscar_perguntas: 'Buscar Perguntas',
+      localizacao: 'Localização',
+      inscricao: 'Inscrição',
     }
     const toolsData = Object.entries(toolCounts)
       .map(([k, v]) => ({ label: toolLabels[k] || k, value: v }))
