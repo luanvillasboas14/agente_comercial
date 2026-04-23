@@ -6,6 +6,11 @@ import { runNearestPolo } from './server/locationTool.js'
 import { runInscricao } from './server/inscricaoTool.js'
 import { runDistribuirHumano } from './server/distribuirHumanoTool.js'
 import { runBuscarHistorico } from './server/memoryTool.js'
+import { marcarClienteIA, updateDadosCliente, getLeadIdByTelefone } from './server/dadosClienteStore.js'
+import { saveConversation } from './server/historyStore.js'
+import { withSessionLock } from './server/evolution/concurrency.js'
+import { findLeadByPhone, createLeadNote } from './server/kommoClient.js'
+import { sendMessageWithNote, sendText, splitMessage } from './server/whatsappSender.js'
 import { makeEvolutionWebhookHandler } from './server/evolution/webhookEvolution.js'
 import { pingBackend, pushMessage, getMessages, clearMessages } from './server/evolution/messageBuffer.js'
 import { getDebounceMs } from './server/evolution/debouncer.js'
@@ -198,6 +203,150 @@ app.post('/api/memory/history', async (req, res) => {
   }
 })
 
+// ── Store: dados_cliente (Supabase principal) ──
+//    Node "Atualizar Cliente" do N8N: seta teste_AB='IA' + id_lead por telefone.
+
+app.post('/api/clientes/marcar-ia', async (req, res) => {
+  try {
+    const { telefone, id_lead, idLead } = req.body || {}
+    const out = await marcarClienteIA(process.env, {
+      telefone,
+      idLead: id_lead ?? idLead,
+    })
+    if (!out.ok) {
+      const http = ['MISSING_TELEFONE', 'MISSING_ID_LEAD', 'MISSING_FIELDS', 'SUPABASE_NOT_CONFIGURED'].includes(out.code) ? 400 : 500
+      res.status(http).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// UPDATE genérico na mesma tabela — útil para os próximos nodes do fluxo.
+app.post('/api/clientes/update', async (req, res) => {
+  try {
+    const { telefone, fields } = req.body || {}
+    const out = await updateDadosCliente(process.env, { telefone, fields })
+    if (!out.ok) {
+      const http = ['MISSING_TELEFONE', 'MISSING_FIELDS', 'SUPABASE_NOT_CONFIGURED'].includes(out.code) ? 400 : 500
+      res.status(http).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Histórico da conversa (chats + chat_messages + face-insta) ──
+
+app.post('/api/history/save', async (req, res) => {
+  try {
+    const { telefone, user_message, userMessage, bot_message, botMessage, message_type, messageType, id_lead, idLead } = req.body || {}
+    const out = await saveConversation(process.env, {
+      telefone,
+      userMessage: userMessage ?? user_message,
+      botMessage: botMessage ?? bot_message,
+      messageType: messageType ?? message_type,
+      idLead: idLead ?? id_lead,
+    })
+    res.status(out.ok ? 200 : 500).json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Kommo: busca lead por telefone + nota avulsa ──
+
+app.get('/api/kommo/lead-by-phone', async (req, res) => {
+  try {
+    const telefone = req.query?.telefone || req.query?.phone
+    if (!telefone) {
+      res.status(400).json({ ok: false, error: 'telefone é obrigatório' })
+      return
+    }
+    const out = await findLeadByPhone(process.env, telefone)
+    res.status(out.ok ? 200 : 500).json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+app.post('/api/kommo/lead-note', async (req, res) => {
+  try {
+    const { leadId, id_lead, text } = req.body || {}
+    const id = leadId ?? id_lead
+    if (!id || !text) {
+      res.status(400).json({ ok: false, error: 'leadId e text são obrigatórios' })
+      return
+    }
+    const out = await createLeadNote(process.env, id, text)
+    res.status(out.ok ? 200 : 500).json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── WhatsApp Cloud API (Meta/WACA): envio + nota no Kommo ──
+//    Espelha o fluxo do `envio mensagem.txt` do N8N.
+
+app.post('/api/whatsapp/send', async (req, res) => {
+  try {
+    const { telefone, phone, text, message, leadId, id_lead, executionId } = req.body || {}
+    const to = telefone ?? phone
+    const body = text ?? message
+    if (!to || !body) {
+      res.status(400).json({ ok: false, error: 'telefone e text são obrigatórios' })
+      return
+    }
+    const out = await sendMessageWithNote(process.env, {
+      telefone: to,
+      text: body,
+      leadId: leadId ?? id_lead,
+      executionId,
+    })
+    res.status(out.ok ? 200 : 500).json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// Só envio (sem nota), útil pra testar credenciais da Cloud API rapidinho.
+app.post('/api/whatsapp/send-text', async (req, res) => {
+  try {
+    const { telefone, phone, text, message } = req.body || {}
+    const to = telefone ?? phone
+    const body = text ?? message
+    if (!to || !body) {
+      res.status(400).json({ ok: false, error: 'telefone e text são obrigatórios' })
+      return
+    }
+    const out = await sendText(process.env, { to, text: body })
+    res.status(out.ok ? 200 : 500).json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// Preview do smartSplit — não chama a API, só mostra como uma mensagem seria dividida.
+app.post('/api/whatsapp/split-preview', (req, res) => {
+  try {
+    const { text, message, maxChars } = req.body || {}
+    const body = text ?? message
+    if (!body) {
+      res.status(400).json({ ok: false, error: 'text é obrigatório' })
+      return
+    }
+    const n = Number(maxChars || process.env.WHATSAPP_MAX_CHARS || 1000)
+    const parts = splitMessage(body, n)
+    res.json({ ok: true, total: parts.length, maxChars: n, parts })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // ── Webhook Evolution (classifica, transcreve, analisa, debounce, chama IA) ──
 
 app.post('/api/evolution/webhook', makeEvolutionWebhookHandler(process.env))
@@ -255,20 +404,41 @@ app.post('/api/playground/flush', async (req, res) => {
       res.status(400).json({ ok: false, error: 'sessionId é obrigatório' })
       return
     }
-    const itens = await getMessages(process.env, sessionId)
-    if (!itens.length) {
-      res.json({ ok: true, empty: true, joined: '', reply: null })
-      return
-    }
-    await clearMessages(process.env, sessionId)
-    const joined = itens.join(', ')
-    const telefoneFinal = telefone || String(sessionId).split('@')[0].replace(/[^0-9]/g, '') || ''
-    const out = await runAgent(process.env, {
-      telefone: telefoneFinal,
-      pushName: pushName || '',
-      userMessage: joined,
+    const result = await withSessionLock(sessionId, async () => {
+      const itens = await getMessages(process.env, sessionId)
+      if (!itens.length) {
+        return { ok: true, empty: true, joined: '', reply: null }
+      }
+      await clearMessages(process.env, sessionId)
+      const joined = itens.join(', ')
+      const telefoneFinal = telefone || String(sessionId).split('@')[0].replace(/[^0-9]/g, '') || ''
+      const out = await runAgent(process.env, {
+        telefone: telefoneFinal,
+        pushName: pushName || '',
+        userMessage: joined,
+      })
+      if (out?.ok && out.reply) {
+        getLeadIdByTelefone(process.env, telefoneFinal)
+          .then((idLead) =>
+            saveConversation(process.env, {
+              telefone: telefoneFinal,
+              userMessage: joined,
+              botMessage: out.reply,
+              messageType: 'conversation',
+              idLead,
+            }),
+          )
+          .then((hist) => {
+            if (hist && !hist.ok) {
+              const failed = hist.steps.filter((s) => s.ok === false)
+              console.warn('[Playground][history] falhas:', JSON.stringify(failed))
+            }
+          })
+          .catch((err) => console.error('[Playground][history] exception:', err.message))
+      }
+      return { ok: true, joined, count: itens.length, ...out }
     })
-    res.json({ ok: true, joined, count: itens.length, ...out })
+    res.json(result)
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }

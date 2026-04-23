@@ -18,6 +18,11 @@ import { pushMessage, getMessages, clearMessages } from './messageBuffer.js'
 import { scheduleFlush } from './debouncer.js'
 import { transcribeAudioBase64, analyzeImageBase64 } from './openaiMedia.js'
 import { runAgent } from '../ai/agentRunner.js'
+import { saveConversation } from '../historyStore.js'
+import { getLeadIdByTelefone } from '../dadosClienteStore.js'
+import { seenMessage, withSessionLock } from './concurrency.js'
+import { findLeadByPhone } from '../kommoClient.js'
+import { sendMessageWithNote } from '../whatsappSender.js'
 
 function getBody(req) {
   const body = req.body || {}
@@ -50,6 +55,11 @@ function normalizeTelefone(sessionId) {
 function getPushName(payload) {
   const d = payload?.data || payload
   return d?.pushName || d?.pushname || ''
+}
+
+function getMessageId(payload) {
+  const d = payload?.data || payload
+  return d?.key?.id || d?.messageId || d?.id || null
 }
 
 function getBase64(payload) {
@@ -119,7 +129,7 @@ async function extractMessageText(env, payload, messageType) {
   }
 }
 
-async function flushSession(env, sessionId) {
+async function flushSessionInner(env, sessionId) {
   const itens = await getMessages(env, sessionId)
   if (!itens.length) {
     console.log(`[Evolution][flush] ${sessionId} sem mensagens pendentes`)
@@ -136,11 +146,65 @@ async function flushSession(env, sessionId) {
     } else {
       console.error(`[Evolution][agent] erro:`, out.error)
     }
+    if (out?.ok && out.reply) {
+      let idLead = null
+      try {
+        const lookup = await findLeadByPhone(env, telefone)
+        if (lookup.ok && lookup.lead) {
+          idLead = lookup.lead.id
+          console.log(`[Evolution][kommo] lead ${idLead} encontrado p/ ${telefone}`)
+        } else if (!lookup.ok) {
+          console.warn(`[Evolution][kommo] falha busca lead: ${lookup.error || lookup.status}`)
+        } else {
+          console.log(`[Evolution][kommo] nenhum lead encontrado p/ ${telefone}`)
+        }
+      } catch (err) {
+        console.error('[Evolution][kommo] exception:', err.message)
+      }
+      if (idLead == null) {
+        try { idLead = await getLeadIdByTelefone(env, telefone) } catch {}
+      }
+
+      try {
+        const send = await sendMessageWithNote(env, {
+          telefone,
+          text: out.reply,
+          leadId: idLead,
+        })
+        if (send.ok) {
+          console.log(`[Evolution][whatsapp] enviado ${send.sent}/${send.total} partes (exec ${send.executionId})`)
+        } else {
+          console.error(`[Evolution][whatsapp] falha após ${send.sent}/${send.total}:`, send.error)
+        }
+      } catch (err) {
+        console.error('[Evolution][whatsapp] exception:', err.message)
+      }
+
+      try {
+        const hist = await saveConversation(env, {
+          telefone,
+          userMessage: mensagemCompleta,
+          botMessage: out.reply,
+          messageType: 'conversation',
+          idLead,
+        })
+        if (!hist.ok) {
+          const failed = hist.steps.filter((s) => s.ok === false)
+          console.warn('[Evolution][history] falhas:', JSON.stringify(failed))
+        }
+      } catch (err) {
+        console.error('[Evolution][history] exception:', err.message)
+      }
+    }
     return out
   } catch (err) {
     console.error('[Evolution][agent] exception:', err.message)
     return null
   }
+}
+
+function flushSession(env, sessionId) {
+  return withSessionLock(sessionId, () => flushSessionInner(env, sessionId))
 }
 
 export function makeEvolutionWebhookHandler(env) {
@@ -163,7 +227,14 @@ export function makeEvolutionWebhookHandler(env) {
       return
     }
 
-    res.status(200).json({ ok: true, accepted: true, messageType, sessionId })
+    const messageId = getMessageId(payload)
+    if (seenMessage(messageId)) {
+      console.log(`[Evolution] duplicado ignorado (${messageId}) ${sessionId}`)
+      res.status(200).json({ ok: true, skipped: 'duplicate', messageId })
+      return
+    }
+
+    res.status(200).json({ ok: true, accepted: true, messageType, sessionId, messageId })
 
     setImmediate(async () => {
       try {

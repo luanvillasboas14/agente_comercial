@@ -24,10 +24,22 @@ const TOPIC_LABELS = {
 }
 
 const TOPIC_COLORS = {
-  'Pediu preço': 'oklch(66% 0.18 268)',
-  'Pediu informações do curso': 'oklch(68% 0.16 215)',
-  'Pediu pós-graduação': 'oklch(72% 0.14 155)',
-  'Fez uma pergunta (FAQ)': 'oklch(78% 0.14 75)',
+  'Pediu preço': '#f472b6',
+  'Pediu informações do curso': '#34d399',
+  'Pediu pós-graduação': '#c084fc',
+  'Fez uma pergunta (FAQ)': '#fbbf24',
+  'Pediu polo / localização': '#38bdf8',
+  'Inscrição / matrícula': '#f87171',
+  'Distribuição para humano': '#94a3b8',
+}
+
+const FALLBACK_TOPIC_COLORS = [
+  '#f472b6', '#34d399', '#c084fc', '#fbbf24',
+  '#38bdf8', '#f87171', '#94a3b8', '#a3e635',
+]
+
+function resolveTopicColor(label, index) {
+  return TOPIC_COLORS[label] || FALLBACK_TOPIC_COLORS[index % FALLBACK_TOPIC_COLORS.length]
 }
 
 function calcCost(usage, model) {
@@ -147,6 +159,8 @@ function Donut({ data }) {
   if (data.length === 0) return <div className="empty">Sem dados no período</div>
   const R = 56, SW = 14, C = 2 * Math.PI * R
   const total = data.reduce((s, d) => s + d.value, 0)
+  const topicsCount = data.length
+  const GAP = data.length > 1 ? 3 : 0
   let offset = 0
 
   return (
@@ -155,34 +169,33 @@ function Donut({ data }) {
         <svg width="150" height="150" viewBox="0 0 150 150">
           <circle cx="75" cy="75" r={R} fill="none" stroke="var(--bg-4)" strokeWidth={SW} />
           {data.map((d, i) => {
-            const len = (d.value / total) * C
+            const fullLen = (d.value / total) * C
+            const len = Math.max(0, fullLen - GAP)
             const el = (
               <circle key={i} cx="75" cy="75" r={R} fill="none"
-                stroke={d.color} strokeWidth={SW}
+                stroke={d.color} strokeWidth={SW} strokeLinecap="round"
                 strokeDasharray={`${len} ${C - len}`}
                 strokeDashoffset={-offset}
                 transform="rotate(-90 75 75)" />
             )
-            offset += len
+            offset += fullLen
             return el
           })}
         </svg>
         <div className="donut-center">
           <div>
-            <div className="donut-center-val tnum">{total.toLocaleString('pt-BR')}</div>
-            <div className="donut-center-lbl">tópicos</div>
+            <div className="donut-center-val tnum">{topicsCount.toLocaleString('pt-BR')}</div>
+            <div className="donut-center-lbl">{topicsCount === 1 ? 'tópico' : 'tópicos'}</div>
           </div>
         </div>
       </div>
       <div className="donut-legend">
         {data.map((d, i) => (
-          <div key={i} className="legend-row">
+          <div key={i} className="legend-row" style={{ '--topic-color': d.color }}>
             <span className="legend-dot" style={{ background: d.color }} />
             <span className="legend-name">{d.label}</span>
-            <span className="legend-val tnum">
-              {d.value.toLocaleString('pt-BR')}
-              <span className="legend-pct">{((d.value / total) * 100).toFixed(0)}%</span>
-            </span>
+            <span className="legend-val tnum">{d.value.toLocaleString('pt-BR')}</span>
+            <span className="legend-pct tnum">{((d.value / total) * 100).toFixed(0)}%</span>
           </div>
         ))}
       </div>
@@ -417,7 +430,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="card-body">
-                    <Donut data={stats.topicsData.map(d => ({ ...d, color: TOPIC_COLORS[d.label] || 'var(--accent)' }))} />
+                    <Donut data={stats.topicsData.map((d, i) => ({ ...d, color: resolveTopicColor(d.label, i) }))} />
                   </div>
                 </div>
               </div>

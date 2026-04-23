@@ -1,0 +1,159 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "00f79506-a02c-467a-9ff3-0974e9cf02af",
+      "name": "Loop Over Items3",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        12816,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "id": "90b80d3c-ae16-44b3-af33-d377563acf54",
+      "name": "1 segundo",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        13488,
+        480
+      ],
+      "webhookId": "a2c69e1c-13fe-44a2-962c-1249288537eb"
+    },
+    {
+      "parameters": {
+        "resource": "notes",
+        "operation": "createNotes",
+        "notes": {
+          "common": [
+            {
+              "entity_id": "={{ $('Edit Fields1').item.json.data._embedded.leads[0].id }}",
+              "text": "={{ $('Loop Over Items3').item.json.text }} - {{ $execution.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-kommo.kommo",
+      "typeVersion": 1,
+      "position": [
+        13264,
+        480
+      ],
+      "id": "df75a852-d089-4656-a3ab-95b360a9556b",
+      "name": "Create new notes",
+      "credentials": {
+        "kommoOAuth2Api": {
+          "id": "nwQNgfBiNqLrzKlG",
+          "name": "Kommo Comercial CSV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "440327379171310",
+        "recipientPhoneNumber": "={{ $('Dados').item.json.Telefone.replace('@s.whatsapp.net', '') }}",
+        "textBody": "={{ $('Code in JavaScript1').item.json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        13072,
+        480
+      ],
+      "id": "e5ad1fd8-5bf3-4778-bd39-6b0e4f4e0d97",
+      "name": "Send message",
+      "webhookId": "97ad0e83-cc00-48c6-8948-06d3a14986f0",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "uKAVEc80et1CTr0c",
+          "name": "WACA CSV Comercial"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Config =====\nconst MAX = 1000;          // tamanho máximo por mensagem\nconst ADD_HEADER = false;  // NÃO coloca \"(1/3)\" etc (mantido por compatibilidade)\n\n// Texto de entrada (ajuste se necessário)\nconst text =\n  $json.text ||\n  $json.message ||\n  $json.mensagem ||\n  $json.body ||\n  \"\";\n\n// ===== Split logic =====\nfunction smartSplit(input, maxLen) {\n  const s = String(input || \"\").trim();\n  if (!s) return [];\n\n  const chunks = [];\n  let i = 0;\n\n  const pickCut = (window) => {\n    // procura o melhor ponto de quebra dentro da janela\n    const prefer = [\"\\n\\n\", \"\\n\", \". \", \"! \", \"? \", \"; \", \", \", \" \"];\n\n    for (const sep of prefer) {\n      const idx = window.lastIndexOf(sep);\n      // evita quebrar cedo demais (ex: em 30 chars)\n      if (idx >= Math.min(200, Math.floor(maxLen * 0.4))) {\n        // se separador tem 2 chars (\". \"), mantém o ponto no chunk\n        return idx + (sep.length === 2 ? 1 : 0);\n      }\n    }\n\n    // se não achou separador bom, tenta qualquer espaço perto do fim\n    const lastSpace = window.lastIndexOf(\" \");\n    if (lastSpace > 20) return lastSpace;\n\n    // fallback: corta no limite\n    return window.length;\n  };\n\n  while (i < s.length) {\n    if (s.length - i <= maxLen) {\n      chunks.push(s.slice(i).trim());\n      break;\n    }\n\n    const window = s.slice(i, i + maxLen);\n    let cut = pickCut(window);\n\n    let piece = window.slice(0, cut).trim();\n    if (!piece) {\n      // segurança anti-loop\n      piece = window.slice(0, maxLen).trim();\n      cut = maxLen;\n    }\n\n    chunks.push(piece);\n\n    // avança e pula espaços/quebras\n    i += cut;\n    while (s[i] === \" \" || s[i] === \"\\n\") i++;\n  }\n\n  return chunks.filter(Boolean);\n}\n\nlet parts = smartSplit(text, MAX);\n\n// ===== Header removido (sem (1/2), (2/2)) =====\n// Mantive o ADD_HEADER por compatibilidade, mas ele está desligado.\n// Se quiser garantir 100%, não aplicamos header mesmo que alguém ligue sem querer.\nif (false && ADD_HEADER && parts.length > 1) {\n  // intencionalmente desativado\n}\n\n// ===== Return as multiple items =====\nreturn parts.map((p, idx) => ({\n  json: {\n    part_index: idx + 1,\n    part_total: parts.length,\n    text: p, // <- vem puro, sem prefixo\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11952,
+        528
+      ],
+      "id": "b281e32e-1738-4758-97ef-87b493c2364a",
+      "name": "Code in JavaScript1"
+    }
+  ],
+  "connections": {
+    "Loop Over Items3": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1 segundo": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create new notes": {
+      "main": [
+        [
+          {
+            "node": "1 segundo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message": {
+      "main": [
+        [
+          {
+            "node": "Create new notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}
