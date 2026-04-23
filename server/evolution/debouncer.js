@@ -16,9 +16,9 @@ export function getDebounceMs(env) {
     ms = Number(env.MESSAGE_DEBOUNCE_MS)
   } else {
     const seconds = Number(raw)
-    ms = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 20000
+    ms = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 15000
   }
-  if (!Number.isFinite(ms) || ms <= 0) ms = 20000
+  if (!Number.isFinite(ms) || ms <= 0) ms = 15000
   return ms
 }
 

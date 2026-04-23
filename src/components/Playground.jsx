@@ -6,7 +6,7 @@ import { generateExecutionId, saveExecution } from '../lib/executionStore'
 const MODELS = ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4.1']
 const DEFAULT_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 const MAX_TOOL_ROUNDS = 5
-const DEFAULT_DEBOUNCE_MS = 20000
+const DEFAULT_DEBOUNCE_MS = 15000
 
 const CHAT_STORAGE_KEY = 'playground_chat'
 const WA_MODE_KEY = 'playground_wa_mode'
