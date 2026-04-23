@@ -140,6 +140,29 @@ export async function executarInscricao(args) {
   return `Inscrição não executada: ${data.error || data.message || data.code || `HTTP ${res.status}`}`
 }
 
+/** Tool memória — histórico da conversa em n8n_chat_histories (Supabase principal). */
+export async function executarBuscarHistorico(args) {
+  const res = await fetch('/api/memory/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      telefone: args.telefone,
+      limit: args.limit,
+    }),
+  })
+  let data
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error('Resposta inválida da API de memória')
+  }
+  if (!data.ok) {
+    if (data.code === 'MISSING_PARAMS') return data.error || 'Informe o telefone do lead para buscar o histórico.'
+    return `Não foi possível recuperar o histórico: ${data.error || `HTTP ${res.status}`}`
+  }
+  return data.historico || 'Sem histórico de conversa disponível.'
+}
+
 /** Tool distribuir_humano — fila de consultor (Kommo + distrib_comercial + resumo). */
 export async function executarDistribuirHumano(args) {
   const res = await fetch('/api/distribuir-humano/run', {
@@ -302,6 +325,31 @@ export const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'buscar_historico_conversa',
+      description:
+        'Recupera o histórico recente de conversa com o lead no WhatsApp (memória do agente, tabela n8n_chat_histories). ' +
+        'Use SEMPRE que o telefone do lead estiver disponível no contexto e você ainda não conhecer a conversa anterior — ' +
+        'chame UMA vez no início do turno para entender o que já foi tratado antes de responder. ' +
+        'A chave (session_id) é o telefone em dígitos + "@s.whatsapp.net" e é montada automaticamente a partir do parâmetro telefone.',
+      parameters: {
+        type: 'object',
+        properties: {
+          telefone: {
+            type: 'string',
+            description: 'Telefone do lead (ex.: "5511998209798") ou o session_id completo (ex.: "5511998209798@s.whatsapp.net").',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Quantas mensagens recuperar (padrão 20, máx 100). Use 8–20 para entender o contexto recente.',
+          },
+        },
+        required: ['telefone'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'distribuir_humano',
       description:
         '⚠️ SÓ USAR SE o contexto/RAG indicar distribuir_humano ou ausência de resultado de curso (RAG_SEM_RESULTADO). ' +
@@ -333,4 +381,5 @@ export const TOOL_EXECUTORS = {
   localizacao: (args) => executarLocalizacao(args),
   inscricao: (args) => executarInscricao(args),
   distribuir_humano: (args) => executarDistribuirHumano(args),
+  buscar_historico_conversa: (args) => executarBuscarHistorico(args),
 }

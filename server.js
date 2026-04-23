@@ -5,6 +5,11 @@ import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
 import { runNearestPolo } from './server/locationTool.js'
 import { runInscricao } from './server/inscricaoTool.js'
 import { runDistribuirHumano } from './server/distribuirHumanoTool.js'
+import { runBuscarHistorico } from './server/memoryTool.js'
+import { makeEvolutionWebhookHandler } from './server/evolution/webhookEvolution.js'
+import { pingBackend, pushMessage, getMessages, clearMessages } from './server/evolution/messageBuffer.js'
+import { getDebounceMs } from './server/evolution/debouncer.js'
+import { runAgent } from './server/ai/agentRunner.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -169,6 +174,101 @@ app.post('/api/distribuir-humano/run', async (req, res) => {
       return
     }
     res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Tool memória (n8n_chat_histories no Supabase principal) ──
+
+app.post('/api/memory/history', async (req, res) => {
+  try {
+    const out = await runBuscarHistorico(process.env, req.body || {})
+    if (!out.ok && (out.code === 'MISSING_PARAMS' || out.code === 'SUPABASE_NOT_CONFIGURED')) {
+      res.status(400).json(out)
+      return
+    }
+    if (!out.ok) {
+      res.status(500).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Webhook Evolution (classifica, transcreve, analisa, debounce, chama IA) ──
+
+app.post('/api/evolution/webhook', makeEvolutionWebhookHandler(process.env))
+
+app.get('/api/evolution/health', async (_req, res) => {
+  try {
+    const ping = await pingBackend(process.env)
+    res.json({
+      ok: true,
+      buffer: ping,
+      debounceMs: getDebounceMs(process.env),
+    })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Endpoint direto de teste do agente (mesmo loop do webhook, sem buffer) ──
+
+app.post('/api/agent/run', async (req, res) => {
+  try {
+    const out = await runAgent(process.env, req.body || {})
+    if (!out.ok) {
+      res.status(500).json(out)
+      return
+    }
+    res.json(out)
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// ── Playground: simular o fluxo da Evolution (buffer + debounce) ──
+//    push  → empurra a mensagem no buffer (mesma tabela do webhook real)
+//    flush → lê tudo, limpa o buffer e dispara o agente; retorna a reply
+
+app.post('/api/playground/push', async (req, res) => {
+  try {
+    const { sessionId, message } = req.body || {}
+    if (!sessionId || !message) {
+      res.status(400).json({ ok: false, error: 'sessionId e message são obrigatórios' })
+      return
+    }
+    await pushMessage(process.env, sessionId, message)
+    res.json({ ok: true, sessionId })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+app.post('/api/playground/flush', async (req, res) => {
+  try {
+    const { sessionId, telefone, pushName } = req.body || {}
+    if (!sessionId) {
+      res.status(400).json({ ok: false, error: 'sessionId é obrigatório' })
+      return
+    }
+    const itens = await getMessages(process.env, sessionId)
+    if (!itens.length) {
+      res.json({ ok: true, empty: true, joined: '', reply: null })
+      return
+    }
+    await clearMessages(process.env, sessionId)
+    const joined = itens.join(', ')
+    const telefoneFinal = telefone || String(sessionId).split('@')[0].replace(/[^0-9]/g, '') || ''
+    const out = await runAgent(process.env, {
+      telefone: telefoneFinal,
+      pushName: pushName || '',
+      userMessage: joined,
+    })
+    res.json({ ok: true, joined, count: itens.length, ...out })
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }

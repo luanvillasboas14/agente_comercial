@@ -1,0 +1,787 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c5ccbc9-69d1-4b13-a7c3-e6945bc8c655",
+              "name": "data",
+              "value": "={{ $('Webhook EVO').item.json.body.data.message.base64 }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a4377234-9405-48ea-a843-e903443fe310",
+      "name": "Edit Fields3",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6048,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "ade56c50-1520-4760-8df5-e99617d6d3ad",
+              "leftValue": "={{ $('Webhook EVO').item.json.body.data.message.imageMessage.caption }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6a3ec36a-220e-4470-a7cf-546b66422e23",
+      "name": "If6",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7056,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "text": "Analise essa imagem e resuma pra mim o que ela é",
+        "inputType": "base64",
+        "options": {}
+      },
+      "id": "6bcb7bb1-06e3-4e14-8e66-7c483d362036",
+      "name": "OpenAI2",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.6,
+      "position": [
+        6752,
+        592
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "id": "682e3656-f4ce-4e90-bab7-ddc74a275834",
+      "name": "OpenAI4",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.6,
+      "position": [
+        6864,
+        416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "4fXizCuCrLR4SEIp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data",
+        "options": {
+          "fileName": "file.ogg",
+          "mimeType": "application/ogg"
+        }
+      },
+      "id": "7b206cd0-bed3-4121-84e4-d7ee7ec22f56",
+      "name": "Converter Audio",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        6592,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data",
+        "options": {
+          "fileName": "file.png",
+          "mimeType": "image/png"
+        }
+      },
+      "id": "5a436850-6711-41df-abb0-d7aa02ffbe96",
+      "name": "Converter Foto",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        6352,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "52aaf749-fe4f-44e4-880e-15b2bfc027f1",
+                    "leftValue": "={{ $('Webhook EVO').item.json.body.data.messageType }}",
+                    "rightValue": "extendedTextMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "e514e613-fd6a-48bd-b0ae-bae2448c810e",
+                    "leftValue": "={{ $('Webhook EVO').item.json.body.data.messageType }}",
+                    "rightValue": "conversation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook EVO').item.json.body.data.messageType }}",
+                    "rightValue": "audioMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8e717a3a-742c-4dd1-883a-42833cf813e9"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "audio"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "c0e434dd-1268-421d-b81b-3a5e90ed9550",
+                    "leftValue": "={{ $('Webhook EVO').item.json.body.data.messageType }}",
+                    "rightValue": "imageMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "image"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "38594d27-4ce1-4b6e-9dfc-ce5f2edca486",
+                    "leftValue": "={{ $('Webhook EVO').item.json.body.data.messageType }}",
+                    "rightValue": "buttonMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9b24c7e1-a0d6-4ccb-9c9e-d08d553cce48",
+      "name": "ROTA Mensagens",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        5664,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "01633671-792f-4dbc-9bd6-ad8026ea8576",
+      "name": "Intervalo entre Mensagens",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        7984,
+        384
+      ],
+      "webhookId": "9f0edf0b-ca36-42a6-bab6-bf62ca08ac51"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Code').item.json.telefoneCorreto }}",
+        "messageData": "={{ $('Dados').item.json.message.content }}",
+        "tail": true
+      },
+      "id": "41c1e92f-1523-4d29-bdc5-f7ffebeab0a0",
+      "name": "Texto Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        6496,
+        144
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados').item.json.Telefone }}",
+        "messageData": "={{ $json.text }}",
+        "tail": true
+      },
+      "id": "20357602-c607-49a4-a13a-49e6983dd24f",
+      "name": "Audio Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        7088,
+        432
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados').item.json.Telefone }}",
+        "messageData": "={{ $json.content.replace(/\\n/g, \"\\\\n\").replace(/['\"]/g, '').trim()  }}",
+        "tail": true
+      },
+      "id": "db975a2b-d4f1-4b9b-b9ad-61d312141f9c",
+      "name": "imagem Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        7520,
+        480
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados').item.json.Telefone }}",
+        "messageData": "={{ $('Dados').item.json.message.content }}, {{ $json.content.replace(/\\n/g, \"\\\\n\").replace(/['\"]/g, '').trim()  }}",
+        "tail": true
+      },
+      "id": "e7f58a93-e164-45f1-b716-594520b279e4",
+      "name": "Imagem Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        7536,
+        624
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $('Code').item.json.telefoneCorreto }}",
+        "options": {}
+      },
+      "id": "60cb757b-b9d3-497e-8438-a19fbf13d36f",
+      "name": "Buscas Mensagens",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        8160,
+        384
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "239cab79-8fb1-45ca-9a04-11006892d52e",
+              "name": "mensagem_completa",
+              "value": "={{ $json.propertyName }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        8512,
+        320
+      ],
+      "id": "3d4e3fdf-b6e8-4e0d-a0c9-39a419c6223a",
+      "name": "Mensagem Completa1"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Code').item.json.telefoneCorreto }}"
+      },
+      "id": "919b688c-93df-43d8-b072-c2043af478b9",
+      "name": "Deletar Mensagens",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        8656,
+        304
+      ],
+      "credentials": {
+        "redis": {
+          "id": "YZXVKYORNr25luYM",
+          "name": "Redis - AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c5ccbc9-69d1-4b13-a7c3-e6945bc8c655",
+              "name": "data",
+              "value": "={{ $('Webhook EVO').item.json.body.data.message.base64 }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "69a59373-8ee0-4d1b-bb60-2dc4b86df588",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6288,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "239cab79-8fb1-45ca-9a04-11006892d52e",
+              "name": "mensagem",
+              "value": "={{ $json.content || $('Dados').item.json.message.content || $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        7808,
+        352
+      ],
+      "id": "2fb04853-a3c8-42af-8414-60266a8c1f5d",
+      "name": "Mensagem"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        6304,
+        272
+      ],
+      "id": "400e7a2e-bf02-4495-afd2-5036b573ce40",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        6112,
+        112
+      ],
+      "id": "ed287bc7-4b86-4304-a18b-91422e3ba8d9",
+      "name": "Merge3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        6048,
+        704
+      ],
+      "id": "600048b3-8d4b-47a4-85ca-dcf177d57b3e",
+      "name": "Merge9"
+    }
+  ],
+  "connections": {
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Converter Foto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If6": {
+      "main": [
+        [
+          {
+            "node": "imagem Redis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Imagem Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI2": {
+      "main": [
+        [
+          {
+            "node": "If6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI4": {
+      "main": [
+        [
+          {
+            "node": "Audio Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter Audio": {
+      "main": [
+        [
+          {
+            "node": "OpenAI4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter Foto": {
+      "main": [
+        [
+          {
+            "node": "OpenAI2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ROTA Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge9",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Intervalo entre Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Buscas Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Texto Redis": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio Redis": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "imagem Redis": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Imagem Redis": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscas Mensagens": {
+      "main": [
+        [
+          {
+            "node": "Mensagem Completa1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Completa1": {
+      "main": [
+        [
+          {
+            "node": "Deletar Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deletar Mensagens": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Converter Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Intervalo entre Mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Texto Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge3": {
+      "main": [
+        [
+          {
+            "node": "Texto Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge9": {
+      "main": [
+        [
+          {
+            "node": "Texto Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2a1ebd20a532a80cff3c388df4cca3488bfc022f2736d484cb218e0dfe52974a"
+  }
+}
