@@ -9,6 +9,7 @@ import { loadPrompts, buildSystemMessage } from './promptsLoader.js'
 import { TOOL_DEFINITIONS } from './toolDefinitions.js'
 import { buildToolExecutors } from './toolExecutorsServer.js'
 import { runBuscarHistorico } from '../memoryTool.js'
+import { generateExecutionId } from './executionTelemetry.js'
 
 const MAX_TOOL_ROUNDS = 5
 const CHAT_URL = 'https://api.openai.com/v1/chat/completions'
@@ -93,14 +94,16 @@ async function executeToolCalls(executors, toolCalls, trace) {
 
 /**
  * @param {object} env    process.env
- * @param {object} input  { telefone, userMessage, pushName }
- * @returns { ok, reply, toolCalls[], usage, durationMs }
+ * @param {object} input  { telefone, userMessage, pushName, executionId? }
+ * @returns { ok, reply, toolCalls[], usage, durationMs, executionId, model }
  */
 export async function runAgent(env, input) {
   const t0 = Date.now()
   const telefone = input?.telefone || ''
   const userMessage = (input?.userMessage || '').trim()
-  if (!userMessage) return { ok: false, error: 'Mensagem vazia' }
+  const executionId = input?.executionId || generateExecutionId()
+  const model = resolveModel(env)
+  if (!userMessage) return { ok: false, error: 'Mensagem vazia', executionId, model }
 
   const [prompts, historyMessages] = await Promise.all([
     loadPrompts(),
@@ -154,6 +157,8 @@ export async function runAgent(env, input) {
         usage,
         durationMs: Date.now() - t0,
         historyLoaded: historyMessages.length,
+        executionId,
+        model,
       }
     }
     return {
@@ -162,6 +167,8 @@ export async function runAgent(env, input) {
       toolCalls: toolTrace,
       usage,
       durationMs: Date.now() - t0,
+      executionId,
+      model,
     }
   } catch (err) {
     return {
@@ -170,6 +177,8 @@ export async function runAgent(env, input) {
       toolCalls: toolTrace,
       usage,
       durationMs: Date.now() - t0,
+      executionId,
+      model,
     }
   }
 }

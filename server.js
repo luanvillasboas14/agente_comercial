@@ -11,6 +11,7 @@ import { saveConversation } from './server/historyStore.js'
 import { withSessionLock } from './server/evolution/concurrency.js'
 import { findLeadByPhone, createLeadNote } from './server/kommoClient.js'
 import { sendMessageWithNote, sendText, splitMessage } from './server/whatsappSender.js'
+import { generateExecutionId, saveExecution } from './server/ai/executionTelemetry.js'
 import { makeEvolutionWebhookHandler } from './server/evolution/webhookEvolution.js'
 import { pingBackend, pushMessage, getMessages, clearMessages } from './server/evolution/messageBuffer.js'
 import { getDebounceMs } from './server/evolution/debouncer.js'
@@ -412,10 +413,13 @@ app.post('/api/playground/flush', async (req, res) => {
       await clearMessages(process.env, sessionId)
       const joined = itens.join(', ')
       const telefoneFinal = telefone || String(sessionId).split('@')[0].replace(/[^0-9]/g, '') || ''
+      const executionId = generateExecutionId()
+      const startedAt = new Date().toISOString()
       const out = await runAgent(process.env, {
         telefone: telefoneFinal,
         pushName: pushName || '',
         userMessage: joined,
+        executionId,
       })
       if (out?.ok && out.reply) {
         getLeadIdByTelefone(process.env, telefoneFinal)
@@ -431,11 +435,25 @@ app.post('/api/playground/flush', async (req, res) => {
           .then((hist) => {
             if (hist && !hist.ok) {
               const failed = hist.steps.filter((s) => s.ok === false)
-              console.warn('[Playground][history] falhas:', JSON.stringify(failed))
+              console.warn(`[${executionId}] playground history falhas:`, JSON.stringify(failed))
             }
           })
-          .catch((err) => console.error('[Playground][history] exception:', err.message))
+          .catch((err) => console.error(`[${executionId}] playground history exception:`, err.message))
       }
+      saveExecution(process.env, {
+        id: executionId,
+        timestamp: startedAt,
+        userMessage: joined,
+        model: out?.model || null,
+        steps: [],
+        toolCalls: out?.toolCalls || [],
+        response: out?.ok ? out.reply : null,
+        error: out?.ok ? null : out?.error || null,
+        totalDurationMs: out?.durationMs || 0,
+        usage: out?.usage || {},
+        telefone: telefoneFinal,
+        origem: 'playground',
+      }).catch((err) => console.error(`[${executionId}] playground saveExecution exception:`, err.message))
       return { ok: true, joined, count: itens.length, ...out }
     })
     res.json(result)

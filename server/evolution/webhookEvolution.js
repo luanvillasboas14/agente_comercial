@@ -23,6 +23,7 @@ import { getLeadIdByTelefone } from '../dadosClienteStore.js'
 import { seenMessage, withSessionLock } from './concurrency.js'
 import { findLeadByPhone } from '../kommoClient.js'
 import { sendMessageWithNote } from '../whatsappSender.js'
+import { generateExecutionId, saveExecution } from '../ai/executionTelemetry.js'
 
 function getBody(req) {
   const body = req.body || {}
@@ -138,69 +139,129 @@ async function flushSessionInner(env, sessionId) {
   await clearMessages(env, sessionId)
   const mensagemCompleta = itens.join(', ')
   const telefone = normalizeTelefone(sessionId)
-  console.log(`[Evolution][flush] ${sessionId} → "${mensagemCompleta}"`)
+  const executionId = generateExecutionId()
+  const startedAt = new Date().toISOString()
+  console.log(`[${executionId}] flush ${sessionId} → "${mensagemCompleta}"`)
+
+  let out = null
+  let idLead = null
+  let sendResult = null
+  let histResult = null
   try {
-    const out = await runAgent(env, { telefone, userMessage: mensagemCompleta })
+    out = await runAgent(env, { telefone, userMessage: mensagemCompleta, executionId })
     if (out.ok) {
-      console.log(`[Evolution][agent] reply (${out.durationMs}ms, ${out.usage?.total_tokens} tok): ${out.reply?.slice(0, 200)}`)
+      console.log(
+        `[${executionId}] agent ok (${out.durationMs}ms, ${out.usage?.total_tokens} tok, tools=${out.toolCalls?.length || 0}): ${out.reply?.slice(0, 200)}`,
+      )
     } else {
-      console.error(`[Evolution][agent] erro:`, out.error)
+      console.error(`[${executionId}] agent erro:`, out.error)
     }
+
     if (out?.ok && out.reply) {
-      let idLead = null
       try {
         const lookup = await findLeadByPhone(env, telefone)
         if (lookup.ok && lookup.lead) {
           idLead = lookup.lead.id
-          console.log(`[Evolution][kommo] lead ${idLead} encontrado p/ ${telefone}`)
+          console.log(`[${executionId}] kommo lead ${idLead} encontrado p/ ${telefone}`)
         } else if (!lookup.ok) {
-          console.warn(`[Evolution][kommo] falha busca lead: ${lookup.error || lookup.status}`)
+          console.warn(`[${executionId}] kommo falha: ${lookup.error || lookup.status}`)
         } else {
-          console.log(`[Evolution][kommo] nenhum lead encontrado p/ ${telefone}`)
+          console.log(`[${executionId}] kommo nenhum lead p/ ${telefone}`)
         }
       } catch (err) {
-        console.error('[Evolution][kommo] exception:', err.message)
+        console.error(`[${executionId}] kommo exception:`, err.message)
       }
       if (idLead == null) {
         try { idLead = await getLeadIdByTelefone(env, telefone) } catch {}
       }
 
       try {
-        const send = await sendMessageWithNote(env, {
+        sendResult = await sendMessageWithNote(env, {
           telefone,
           text: out.reply,
           leadId: idLead,
+          executionId,
         })
-        if (send.ok) {
-          console.log(`[Evolution][whatsapp] enviado ${send.sent}/${send.total} partes (exec ${send.executionId})`)
+        if (sendResult.ok) {
+          console.log(`[${executionId}] whatsapp enviado ${sendResult.sent}/${sendResult.total} partes`)
         } else {
-          console.error(`[Evolution][whatsapp] falha após ${send.sent}/${send.total}:`, send.error)
+          console.error(`[${executionId}] whatsapp falha após ${sendResult.sent}/${sendResult.total}:`, sendResult.error)
         }
       } catch (err) {
-        console.error('[Evolution][whatsapp] exception:', err.message)
+        console.error(`[${executionId}] whatsapp exception:`, err.message)
       }
 
       try {
-        const hist = await saveConversation(env, {
+        histResult = await saveConversation(env, {
           telefone,
           userMessage: mensagemCompleta,
           botMessage: out.reply,
           messageType: 'conversation',
           idLead,
         })
-        if (!hist.ok) {
-          const failed = hist.steps.filter((s) => s.ok === false)
-          console.warn('[Evolution][history] falhas:', JSON.stringify(failed))
+        if (!histResult.ok) {
+          const failed = histResult.steps.filter((s) => s.ok === false)
+          console.warn(`[${executionId}] history falhas:`, JSON.stringify(failed))
         }
       } catch (err) {
-        console.error('[Evolution][history] exception:', err.message)
+        console.error(`[${executionId}] history exception:`, err.message)
       }
     }
-    return out
   } catch (err) {
-    console.error('[Evolution][agent] exception:', err.message)
-    return null
+    console.error(`[${executionId}] agent exception:`, err.message)
   }
+
+  saveExecution(env, {
+    id: executionId,
+    timestamp: startedAt,
+    userMessage: mensagemCompleta,
+    model: out?.model || null,
+    steps: buildSteps({ sendResult, histResult, idLead }),
+    toolCalls: out?.toolCalls || [],
+    response: out?.ok ? out.reply : null,
+    error: out?.ok ? null : out?.error || 'runAgent retornou null',
+    totalDurationMs: out?.durationMs || 0,
+    usage: out?.usage || {},
+    telefone,
+    leadId: idLead,
+    origem: 'evolution',
+  }).then((r) => {
+    if (!r.ok) console.warn(`[${executionId}] saveExecution falhou: ${r.error}`)
+  }).catch((err) => console.error(`[${executionId}] saveExecution exception:`, err.message))
+
+  return out
+}
+
+/**
+ * Converte o resultado de envio/histórico em "steps" (mesmo conceito do
+ * executionStore/ExecutionViewer) para debugar rapidamente o que aconteceu
+ * depois que o agente respondeu.
+ */
+function buildSteps({ sendResult, histResult, idLead }) {
+  const steps = []
+  if (idLead != null) steps.push({ tool: 'kommo.findLeadByPhone', result: { leadId: idLead } })
+  if (sendResult) {
+    steps.push({
+      tool: 'whatsapp.sendMessageWithNote',
+      result: {
+        ok: sendResult.ok,
+        sent: sendResult.sent,
+        total: sendResult.total,
+        error: sendResult.error || null,
+      },
+    })
+  }
+  if (histResult) {
+    const failed = (histResult.steps || []).filter((s) => s.ok === false).map((s) => s.step || 'step')
+    steps.push({
+      tool: 'history.saveConversation',
+      result: {
+        ok: histResult.ok,
+        failedSubsteps: failed,
+      },
+    })
+  }
+  return steps
 }
 
 function flushSession(env, sessionId) {

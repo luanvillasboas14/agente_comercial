@@ -16,8 +16,8 @@
  *   WHATSAPP_CHUNK_DELAY_MS    opcional, default 1000
  */
 
-import crypto from 'crypto'
 import { createLeadNote } from './kommoClient.js'
+import { generateExecutionId } from './ai/executionTelemetry.js'
 
 function getConfig(env) {
   const maxChars = Number(env.WHATSAPP_MAX_CHARS)
@@ -152,7 +152,7 @@ export async function sendMessageWithNote(env, { telefone, text, leadId, executi
   if (!parts.length) {
     return { ok: false, code: 'EMPTY_BODY', error: 'texto vazio', total: 0, sent: 0, steps: [] }
   }
-  const execId = executionId || crypto.randomUUID()
+  const execId = executionId || generateExecutionId()
   const steps = []
 
   for (let i = 0; i < parts.length; i++) {
