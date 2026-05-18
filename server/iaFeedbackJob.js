@@ -223,12 +223,13 @@ async function callOpenAIEvaluator(env, { regrasText, conversaFormatada }) {
         timeoutMs,
       )
     } catch (e) {
-      lastErr = e
+      // Erro de rede / timeout — categoriza pra ficar legível no banco
+      lastErr = new Error(`[openai] ${e.message || 'erro de rede'} (modelo=${model})`)
       if (attempt < 1) {
         await new Promise((r) => setTimeout(r, 1500 + attempt * 2000))
         continue
       }
-      throw e
+      throw lastErr
     }
 
     if (res.ok) {
@@ -238,16 +239,17 @@ async function callOpenAIEvaluator(env, { regrasText, conversaFormatada }) {
     }
 
     const errText = await res.text().catch(() => '')
+    const summary = `[openai] HTTP ${res.status} (modelo=${model}): ${errText.slice(0, 400) || res.statusText || 'sem corpo'}`
     if (res.status === 429 || res.status >= 500) {
-      lastErr = new Error(`OpenAI ${res.status}: ${errText.slice(0, 400)}`)
+      lastErr = new Error(summary)
       await new Promise((r) => setTimeout(r, 1500 + attempt * 2000))
       continue
     }
-    lastErr = new Error(`OpenAI ${res.status}: ${errText.slice(0, 400)}`)
+    lastErr = new Error(summary)
     break
   }
 
-  throw lastErr || new Error('OpenAI: erro desconhecido')
+  throw lastErr || new Error('[openai] erro desconhecido')
 }
 
 function parseAIJson(text) {
@@ -322,25 +324,41 @@ export async function evaluateLead(env, {
   const sbFeedback = makeSupabaseClient(fbUrl, fbKey, { timeoutMs: 30_000 })
   const minTurns = Math.max(0, Number(env.IA_FEEDBACK_MIN_TURNS || 3))
 
+  // Helper local: grava o erro como linha de ia_feedback (veredito='erro').
+  // Se o próprio save falhar (RLS, timeout, etc.), loga sem propagar — assim
+  // o runner ainda fecha a run e o motivo aparece no console mesmo sem o
+  // registro persistido (não tem como gravar erro de gravação no mesmo lugar).
+  async function persistErro(resumo, conversa, totalMsgs, turnos) {
+    try {
+      await saveAvaliacao(sbFeedback, {
+        leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
+        conversaCompleta: conversa,
+        totalMensagens: totalMsgs,
+        totalTurnosIa: turnos,
+        notaGeral: null,
+        veredito: 'erro',
+        resumoAvaliacao: resumo,
+        violacoes: [],
+        pontosPositivos: [],
+        modeloAvaliador: resolveModel(env, 'ia_feedback'),
+        jobExecutionId,
+      })
+    } catch (saveErr) {
+      console.error(
+        `[iaFeedbackJob] FALHA AO GRAVAR registro de erro para lead=${leadId}. ` +
+        `Erro original: "${resumo}". Erro do save: "${saveErr.message}"`,
+      )
+    }
+  }
+
   // 1. Lê histórico de chat_messages
   let messages = []
   try {
     messages = await fetchChatMessages(env, { leadId, telefone })
   } catch (err) {
-    console.error(`[iaFeedbackJob] Erro ao buscar chat_messages para lead=${leadId}:`, err.message)
-    await saveAvaliacao(sbFeedback, {
-      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
-      conversaCompleta: null,
-      totalMensagens: 0,
-      totalTurnosIa: 0,
-      notaGeral: null,
-      veredito: 'erro',
-      resumoAvaliacao: `Falha ao buscar chat_messages: ${err.message}`,
-      violacoes: [],
-      pontosPositivos: [],
-      modeloAvaliador: resolveModel(env, 'ia_feedback'),
-      jobExecutionId,
-    })
+    const resumo = `[chat_messages] ${err.message || 'falha desconhecida'} (lead_id=${leadId}, telefone=${telefone || 'n/a'})`
+    console.error(`[iaFeedbackJob] ${resumo}`)
+    await persistErro(resumo, null, 0, 0)
     return { ok: false, action: 'erro', motivo: 'ia_falhou' }
   }
 
@@ -374,67 +392,79 @@ export async function evaluateLead(env, {
 
   // 6. Chama OpenAI
   let aiResult = null
+  let rawAIContent = ''
   let modeloAvaliador = resolveModel(env, 'ia_feedback')
 
   try {
     const { content, model } = await callOpenAIEvaluator(env, { regrasText, conversaFormatada })
     modeloAvaliador = model
+    rawAIContent = content
     aiResult = parseAIJson(content)
   } catch (err) {
-    console.error(`[iaFeedbackJob] Erro ao chamar OpenAI para lead=${leadId}:`, err.message)
-    await saveAvaliacao(sbFeedback, {
-      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
-      conversaCompleta: messages,
-      totalMensagens: messages.length,
-      totalTurnosIa: turnosIa,
-      notaGeral: null,
-      veredito: 'erro',
-      resumoAvaliacao: err.message,
-      violacoes: [],
-      pontosPositivos: [],
-      modeloAvaliador,
-      jobExecutionId,
-    })
+    const resumo = err.message?.startsWith('[openai]') ? err.message : `[openai] ${err.message || 'erro desconhecido'}`
+    console.error(`[iaFeedbackJob] lead=${leadId} ${resumo}`)
+    await persistErro(resumo, messages, messages.length, turnosIa)
     return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
   // 7. Valida JSON
-  if (!aiResult || typeof aiResult.nota_geral !== 'number' || !aiResult.veredito) {
-    console.error(`[iaFeedbackJob] Resposta inválida da IA para lead=${leadId}:`, JSON.stringify(aiResult)?.slice(0, 200))
-    await saveAvaliacao(sbFeedback, {
-      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
-      conversaCompleta: messages,
-      totalMensagens: messages.length,
-      totalTurnosIa: turnosIa,
-      notaGeral: null,
-      veredito: 'erro',
-      resumoAvaliacao: 'Resposta da IA não veio em JSON valido',
-      violacoes: [],
-      pontosPositivos: [],
-      modeloAvaliador,
-      jobExecutionId,
-    })
+  if (!aiResult) {
+    const excerpt = rawAIContent.slice(0, 300).replace(/\s+/g, ' ').trim()
+    const resumo = `[parser] resposta da IA nao e JSON valido. Excerpt: "${excerpt || '(vazio)'}"`
+    console.error(`[iaFeedbackJob] lead=${leadId} ${resumo}`)
+    await persistErro(resumo, messages, messages.length, turnosIa)
+    return { ok: false, action: 'erro', motivo: 'erro_modelo' }
+  }
+
+  // 7b. JSON existe mas faltam campos obrigatórios — discrimina o que faltou.
+  if (typeof aiResult.nota_geral !== 'number' || !aiResult.veredito) {
+    const faltou = []
+    if (typeof aiResult.nota_geral !== 'number') faltou.push(`nota_geral=${JSON.stringify(aiResult.nota_geral)}`)
+    if (!aiResult.veredito) faltou.push(`veredito=${JSON.stringify(aiResult.veredito)}`)
+    const got = JSON.stringify(aiResult).slice(0, 200)
+    const resumo = `[parser] JSON valido mas faltam campos obrigatorios: ${faltou.join(', ')}. Got: ${got}`
+    console.error(`[iaFeedbackJob] lead=${leadId} ${resumo}`)
+    await persistErro(resumo, messages, messages.length, turnosIa)
+    return { ok: false, action: 'erro', motivo: 'erro_modelo' }
+  }
+
+  // 7c. Veredito veio mas fora do conjunto esperado — registra como erro e mantém a nota crua.
+  const VEREDITOS_VALIDOS = new Set(['aprovado', 'parcial', 'reprovado'])
+  const veredictoNormalizado = String(aiResult.veredito).toLowerCase().trim()
+  if (!VEREDITOS_VALIDOS.has(veredictoNormalizado)) {
+    const resumo = `[parser] veredito invalido retornado pela IA: "${aiResult.veredito}" (esperado: aprovado|parcial|reprovado)`
+    console.error(`[iaFeedbackJob] lead=${leadId} ${resumo}`)
+    await persistErro(resumo, messages, messages.length, turnosIa)
     return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
   // 8. Grava em ia_feedback
-  await saveAvaliacao(sbFeedback, {
-    leadId,
-    telefone,
-    pipelineIdFrom,
-    statusIdFrom,
-    detectedAt,
-    conversaCompleta: messages,
-    totalMensagens: messages.length,
-    totalTurnosIa: turnosIa,
-    notaGeral: Number(aiResult.nota_geral),
-    veredito: String(aiResult.veredito),
-    resumoAvaliacao: String(aiResult.resumo_avaliacao || ''),
-    violacoes: Array.isArray(aiResult.violacoes) ? aiResult.violacoes : [],
-    pontosPositivos: Array.isArray(aiResult.pontos_positivos) ? aiResult.pontos_positivos : [],
-    modeloAvaliador,
-    jobExecutionId,
-  })
+  try {
+    await saveAvaliacao(sbFeedback, {
+      leadId,
+      telefone,
+      pipelineIdFrom,
+      statusIdFrom,
+      detectedAt,
+      conversaCompleta: messages,
+      totalMensagens: messages.length,
+      totalTurnosIa: turnosIa,
+      notaGeral: Number(aiResult.nota_geral),
+      veredito: veredictoNormalizado,
+      resumoAvaliacao: String(aiResult.resumo_avaliacao || ''),
+      violacoes: Array.isArray(aiResult.violacoes) ? aiResult.violacoes : [],
+      pontosPositivos: Array.isArray(aiResult.pontos_positivos) ? aiResult.pontos_positivos : [],
+      modeloAvaliador,
+      jobExecutionId,
+    })
+  } catch (saveErr) {
+    // Avaliação rodou OK na IA mas falhou ao gravar. Tenta gravar como erro
+    // (persistErro tem try/catch interno — se falhar de novo, só loga).
+    const resumo = `[supabase] falha ao gravar avaliacao bem-sucedida: ${saveErr.message}`
+    console.error(`[iaFeedbackJob] lead=${leadId} ${resumo}`)
+    await persistErro(resumo, messages, messages.length, turnosIa)
+    return { ok: false, action: 'erro', motivo: 'erro_modelo' }
+  }
 
   console.log(`[iaFeedbackJob] ✓ lead=${leadId} nota=${aiResult.nota_geral} veredito=${aiResult.veredito}`)
 
