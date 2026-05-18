@@ -1,4 +1,5 @@
 import express from 'express'
+import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { startScheduler, getStatus } from './server/feedbackJobRunner.js'
@@ -45,6 +46,8 @@ import { runSalesbotCsv, extractLeadIdFromWebhookBody, probePos } from './server
 import { saveSalesbotExecution } from './server/salesbot/telemetry.js'
 import { reindexPos } from './server/salesbot/reindexPos.js'
 import { reindexPerguntas } from './server/ai/reindexPerguntas.js'
+import { startIaFeedbackRunner, getIaFeedbackRunnerStatus } from './server/iaFeedbackRunner.js'
+import { evaluateLead } from './server/iaFeedbackJob.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -1769,6 +1772,173 @@ app.post('/api/playground/analyze-image', async (req, res) => {
   }
 })
 
+// ── Feedback IA ──────────────────────────────────────────────────────────────
+
+function makeIaFeedbackSupabaseClient(env) {
+  const url = (env.SUPABASE_URL_FEEDBACK || '').replace(/\/$/, '')
+  const key = env.SUPABASE_KEY_FEEDBACK || ''
+  if (!url || !key) return null
+
+  const headers = {
+    'apikey': key,
+    'Authorization': `Bearer ${key}`,
+    'Content-Type': 'application/json',
+  }
+
+  return {
+    async select(table, query = '') {
+      const res = await fetch(`${url}/rest/v1/${table}${query ? '?' + query : ''}`, { headers })
+      const text = await res.text()
+      if (!res.ok) throw new Error(`Supabase GET ${table} ${res.status}: ${text.slice(0, 200)}`)
+      return text ? JSON.parse(text) : []
+    },
+  }
+}
+
+app.get('/api/ia-feedback/status', async (req, res) => {
+  try {
+    const runner = getIaFeedbackRunnerStatus()
+    const db = makeIaFeedbackSupabaseClient(process.env)
+
+    let lastRuns = []
+    let counts = { hoje: 0, semana: 0 }
+    let recentes = []
+
+    if (db) {
+      try {
+        lastRuns = await db.select(
+          'ia_feedback_job_runs',
+          'select=*&order=started_at.desc&limit=3',
+        )
+      } catch { /* silencioso */ }
+
+      try {
+        const hoje = new Date()
+        hoje.setHours(0, 0, 0, 0)
+        const semanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        const [rowsHoje, rowsSemana] = await Promise.all([
+          db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(hoje.toISOString())}`),
+          db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(semanaAtras.toISOString())}`),
+        ])
+        counts.hoje = Array.isArray(rowsHoje) ? rowsHoje.length : 0
+        counts.semana = Array.isArray(rowsSemana) ? rowsSemana.length : 0
+      } catch { /* silencioso */ }
+
+      try {
+        recentes = await db.select(
+          'ia_feedback',
+          'select=id,lead_id,telefone,nota_geral,veredito,total_mensagens,total_turnos_ia,detected_at,created_at&order=created_at.desc&limit=10',
+        )
+      } catch { /* silencioso */ }
+    }
+
+    res.json({ runner, lastRuns, counts, recentes })
+  } catch (e) {
+    console.error('[ia-feedback/status]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/ia-feedback/avaliacoes', async (req, res) => {
+  try {
+    const db = makeIaFeedbackSupabaseClient(process.env)
+    if (!db) return res.status(500).json({ error: 'SUPABASE_URL_FEEDBACK não configurado' })
+
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)))
+    const page = Math.max(1, Number(req.query.page || 1))
+    const offset = (page - 1) * limit
+    const filters = []
+    if (req.query.veredito) filters.push(`veredito=eq.${encodeURIComponent(req.query.veredito)}`)
+    if (req.query.lead_id) filters.push(`lead_id=eq.${encodeURIComponent(req.query.lead_id)}`)
+    const filterStr = filters.length ? '&' + filters.join('&') : ''
+
+    const rows = await db.select(
+      'ia_feedback',
+      `select=id,lead_id,telefone,nota_geral,veredito,resumo_avaliacao,total_mensagens,total_turnos_ia,detected_at,created_at,modelo_avaliador${filterStr}&order=created_at.desc&limit=${limit}&offset=${offset}`,
+    )
+    res.json({ rows: rows || [], page, limit })
+  } catch (e) {
+    console.error('[ia-feedback/avaliacoes]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/ia-feedback/avaliacoes/:id', async (req, res) => {
+  try {
+    const db = makeIaFeedbackSupabaseClient(process.env)
+    if (!db) return res.status(500).json({ error: 'SUPABASE_URL_FEEDBACK não configurado' })
+
+    const rows = await db.select(
+      'ia_feedback',
+      `select=*&id=eq.${encodeURIComponent(req.params.id)}&limit=1`,
+    )
+    const row = Array.isArray(rows) ? rows[0] : null
+    if (!row) return res.status(404).json({ error: 'Não encontrado' })
+    res.json(row)
+  } catch (e) {
+    console.error('[ia-feedback/avaliacoes/:id]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/ia-feedback/pendentes', async (req, res) => {
+  try {
+    const db = makeIaFeedbackSupabaseClient(process.env)
+    if (!db) return res.status(500).json({ error: 'SUPABASE_URL_FEEDBACK não configurado' })
+
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)))
+    const page = Math.max(1, Number(req.query.page || 1))
+    const offset = (page - 1) * limit
+
+    const rows = await db.select(
+      'ia_feedback_pendente',
+      `select=id,lead_id,telefone,motivo_pendencia,detected_at,created_at&order=created_at.desc&limit=${limit}&offset=${offset}`,
+    )
+    res.json({ rows: rows || [], page, limit })
+  } catch (e) {
+    console.error('[ia-feedback/pendentes]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/ia-feedback/runs', async (req, res) => {
+  try {
+    const db = makeIaFeedbackSupabaseClient(process.env)
+    if (!db) return res.status(500).json({ error: 'SUPABASE_URL_FEEDBACK não configurado' })
+
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)))
+    const rows = await db.select(
+      'ia_feedback_job_runs',
+      `select=*&order=started_at.desc&limit=${limit}`,
+    )
+    res.json(rows || [])
+  } catch (e) {
+    console.error('[ia-feedback/runs]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/ia-feedback/avaliar-manual', async (req, res) => {
+  try {
+    const { lead_id, telefone } = req.body || {}
+    if (!lead_id && !telefone) {
+      return res.status(400).json({ ok: false, error: 'lead_id ou telefone é obrigatório' })
+    }
+    const result = await evaluateLead(process.env, {
+      leadId: lead_id ? Number(lead_id) : null,
+      telefone: telefone || null,
+      statusIdFrom: Number(process.env.KOMMO_AGENT_STATUS_ID || 0),
+      pipelineIdFrom: Number(process.env.KOMMO_AGENT_PIPELINE_ID || 0),
+      detectedAt: new Date(),
+      jobExecutionId: crypto.randomUUID(),
+    })
+    res.json(result)
+  } catch (e) {
+    console.error('[ia-feedback/avaliar-manual]', e.message)
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // ── Static files ──
 
 app.use(express.static(join(__dirname, 'dist')))
@@ -1820,6 +1990,8 @@ app.listen(PORT, async () => {
   if (!sched.started) {
     console.log(`[Server] Agent scheduler: ${sched.reason}`)
   }
+
+  startIaFeedbackRunner(process.env)
 
   // Probe do dispatcher no boot — falha silenciosa é a pior coisa em
   // produção. Se modo=dispatcher e ele não estiver acessível, a IA

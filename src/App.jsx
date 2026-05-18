@@ -7,7 +7,7 @@ import ExecutionViewer from './components/ExecutionViewer'
 import FeedbackJobViewer from './components/FeedbackJobViewer'
 import FeedbackDashboard from './components/FeedbackDashboard'
 import SalesbotExecutions from './components/SalesbotExecutions'
-import WebhookControl from './components/WebhookControl'
+import FeedbackIAViewer from './components/FeedbackIAViewer'
 import './App.css'
 
 const STORAGE_KEY = 'prompt_edits'
@@ -169,9 +169,9 @@ export default function App() {
           {!loading && !error && page === 'playground' && <Playground prompts={prompts} />}
           {!loading && !error && page === 'executions' && <ExecutionViewer />}
           {!loading && !error && page === 'salesbot-executions' && <SalesbotExecutions />}
-          {!loading && !error && page === 'webhook-control' && <WebhookControl />}
           {!loading && !error && page === 'feedback' && <FeedbackJobViewer />}
           {!loading && !error && page === 'feedback-dashboard' && <FeedbackDashboard />}
+          {!loading && !error && page === 'feedback-ia' && <FeedbackIAViewer />}
         </div>
       </main>
     </div>

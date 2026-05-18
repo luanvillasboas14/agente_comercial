@@ -41,6 +41,7 @@ const DEFAULTS = {
   distribuir_humano_summary: 'gpt-4.1-mini',
   salesbot_curso: 'gpt-4.1',             // melhor accuracy pra normalizar nome de curso (rara execução)
   feedback: 'gpt-4.1-mini',
+  ia_feedback: 'gpt-4.1',               // auditor de qualidade da IA (mais preciso)
   vision: 'gpt-4.1-mini',
   transcribe: 'whisper-1',               // gpt-4o-transcribe é mais caro
   embeddings: 'text-embedding-3-small',  // 3-large é 6.5x mais caro
@@ -57,6 +58,7 @@ const ROLE_ENVS = {
   distribuir_humano_summary: 'OPENAI_MODEL_DISTRIBUIR_HUMANO',
   salesbot_curso: 'OPENAI_MODEL_SALESBOT_CURSO',
   feedback: 'OPENAI_MODEL_FEEDBACK',
+  ia_feedback: 'OPENAI_MODEL_IA_FEEDBACK',
   vision: 'OPENAI_MODEL_VISION',
   transcribe: 'OPENAI_MODEL_TRANSCRIBE',
   embeddings: 'OPENAI_MODEL_EMBEDDINGS',

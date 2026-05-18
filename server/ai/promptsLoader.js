@@ -117,10 +117,7 @@ export async function loadPrompts() {
   }
 }
 
-export function buildSystemMessage(prompts) {
-  const promptsText = prompts.map((p) => `### ${p.name} (${p.type})\n\n${p.body}`).join('\n\n---\n\n')
-  const override = `
-## INSTRUÇÕES DO AGENTE (PRIORIDADE MÁXIMA)
+const AGENT_RULES_TEXT = `## INSTRUÇÕES DO AGENTE (PRIORIDADE MÁXIMA)
 
 Você está conectado ao WhatsApp via Evolution API. Regras abaixo substituem qualquer instrução conflitante dos prompts acima:
 
@@ -404,5 +401,16 @@ Você está conectado ao WhatsApp via Evolution API. Regras abaixo substituem qu
     - Marcador "[ESTAGIO: SIM — 6 disciplinas obrigatorias, 800h totais. Estágio Supervisionado em Farmácia I (20h)..., VI (240h)]" → "Sim, Farmácia tem 6 estágios supervisionados ao longo do curso, totalizando 800h. Eles começam mais leves (20h-40h) e vão crescendo até 240h nos últimos."
     - Marcador "[ESTAGIO: NAO — ...]" → "Esse curso não tem estágio supervisionado obrigatório, então você não precisa cumprir carga de estágio pra concluir."
     - SEM marcador → chama distribuir_humano + "Deixa eu pedir pra um consultor te confirmar isso do curso, ok?"`
-  return promptsText + '\n\n---\n\n' + override
+
+/**
+ * Retorna o bloco de instruções do agente (Rules 1–18).
+ * Usado pelo avaliador de Feedback IA para auditar conversas.
+ */
+export function getAgentRulesText() {
+  return AGENT_RULES_TEXT
+}
+
+export function buildSystemMessage(prompts) {
+  const promptsText = prompts.map((p) => `### ${p.name} (${p.type})\n\n${p.body}`).join('\n\n---\n\n')
+  return promptsText + '\n\n---\n\n' + AGENT_RULES_TEXT
 }

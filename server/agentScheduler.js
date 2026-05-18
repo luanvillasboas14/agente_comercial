@@ -43,6 +43,8 @@
  */
 
 import { listLeadsByStatus, bulkGetContactsByIds, extractContactPhone } from './kommoClient.js'
+import { detectExits } from './iaFeedbackQueue.js'
+import { enqueueLeadForEvaluation } from './iaFeedbackRunner.js'
 import { phoneToWhatsAppSessionId } from './phoneWhatsApp.js'
 import { getMessages, getLastTouchedAt } from './evolution/messageBuffer.js'
 import { flushSession } from './evolution/webhookEvolution.js'
@@ -57,6 +59,10 @@ import {
   formatEventsDiagLine,
   formatDispatcherDiagLine,
 } from './kommoInboundDiagnostics.js'
+
+function isIaFeedbackEnabled(env) {
+  return String(env.IA_FEEDBACK_ENABLED || 'true').toLowerCase() !== 'false'
+}
 
 // Defaults agressivos pra reduzir latência ponta-a-ponta.
 // - Interval: a cada 10s o scheduler verifica se há leads c/ msgs prontas.
@@ -134,6 +140,27 @@ export async function runSchedulerTick(env) {
   }
   const leadsAll = listing.leads || []
   stats.leadsInFunnel = leadsAll.length
+
+  // ── Feedback IA: detecção de saídas ──────────────────────────────────────
+  if (isIaFeedbackEnabled(env)) {
+    try {
+      const currentIds = leadsAll.map((l) => Number(l.id)).filter(Number.isFinite)
+      const exited = await detectExits(env, currentIds, Number(env.KOMMO_AGENT_STATUS_ID))
+      for (const leadId of exited) {
+        enqueueLeadForEvaluation({
+          leadId,
+          statusIdFrom: Number(env.KOMMO_AGENT_STATUS_ID),
+          pipelineIdFrom: Number(env.KOMMO_AGENT_PIPELINE_ID),
+          detectedAt: new Date(),
+        })
+      }
+      if (exited.length > 0) {
+        console.log(`[scheduler] ia_feedback enfileirou ${exited.length} lead(s) que sairam do status`)
+      }
+    } catch (err) {
+      console.error('[scheduler] ia_feedback diff falhou:', err.message)
+    }
+  }
 
   // Whitelist de teste: descarta leads fora da lista ANTES do bulk de
   // contatos, evitando 1 chamada Kommo extra à toa.
