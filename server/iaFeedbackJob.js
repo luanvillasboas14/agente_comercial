@@ -263,18 +263,6 @@ function parseAIJson(text) {
 
 /* ───────────── Gravação ───────────── */
 
-async function savePendente(sbFeedback, { leadId, telefone, detectedAt, motivo, conversa, jobExecutionId }) {
-  await sbFeedback.insert('ia_feedback_pendente', {
-    lead_id: leadId ?? null,
-    telefone: telefone ?? null,
-    detected_at: detectedAt instanceof Date ? detectedAt.toISOString() : detectedAt,
-    motivo_pendencia: motivo,
-    conversa_pendente: conversa ?? null,
-    job_execution_id: jobExecutionId ?? null,
-    created_at: new Date().toISOString(),
-  })
-}
-
 async function saveAvaliacao(sbFeedback, {
   leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
   conversaCompleta, totalMensagens, totalTurnosIa,
@@ -340,20 +328,26 @@ export async function evaluateLead(env, {
     messages = await fetchChatMessages(env, { leadId, telefone })
   } catch (err) {
     console.error(`[iaFeedbackJob] Erro ao buscar chat_messages para lead=${leadId}:`, err.message)
-    await savePendente(sbFeedback, {
-      leadId, telefone, detectedAt, motivo: 'ia_falhou',
-      conversa: null, jobExecutionId,
+    await saveAvaliacao(sbFeedback, {
+      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
+      conversaCompleta: null,
+      totalMensagens: 0,
+      totalTurnosIa: 0,
+      notaGeral: null,
+      veredito: 'erro',
+      resumoAvaliacao: `Falha ao buscar chat_messages: ${err.message}`,
+      violacoes: [],
+      pontosPositivos: [],
+      modeloAvaliador: resolveModel(env, 'ia_feedback'),
+      jobExecutionId,
     })
-    return { ok: false, action: 'pendente', motivo: 'ia_falhou' }
+    return { ok: false, action: 'erro', motivo: 'ia_falhou' }
   }
 
   // 2. Sem conversa
   if (!messages || messages.length === 0) {
-    await savePendente(sbFeedback, {
-      leadId, telefone, detectedAt, motivo: 'sem_conversa',
-      conversa: null, jobExecutionId,
-    })
-    return { ok: true, action: 'pendente', motivo: 'sem_conversa' }
+    console.log(`[iaFeedbackJob] lead=${leadId} sem conversa — skipped`)
+    return { ok: true, action: 'skipped', motivo: 'sem_conversa' }
   }
 
   // 3. Conta turnos da IA (linhas com bot_message não vazio)
@@ -362,11 +356,8 @@ export async function evaluateLead(env, {
   ).length
 
   if (turnosIa < minTurns) {
-    await savePendente(sbFeedback, {
-      leadId, telefone, detectedAt, motivo: 'conversa_curta',
-      conversa: messages, jobExecutionId,
-    })
-    return { ok: true, action: 'pendente', motivo: 'conversa_curta' }
+    console.log(`[iaFeedbackJob] lead=${leadId} conversa curta (${turnosIa} turnos) — skipped`)
+    return { ok: true, action: 'skipped', motivo: 'conversa_curta' }
   }
 
   // 4. Monta conversa formatada
@@ -391,21 +382,39 @@ export async function evaluateLead(env, {
     aiResult = parseAIJson(content)
   } catch (err) {
     console.error(`[iaFeedbackJob] Erro ao chamar OpenAI para lead=${leadId}:`, err.message)
-    await savePendente(sbFeedback, {
-      leadId, telefone, detectedAt, motivo: 'erro_modelo',
-      conversa: messages, jobExecutionId,
+    await saveAvaliacao(sbFeedback, {
+      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
+      conversaCompleta: messages,
+      totalMensagens: messages.length,
+      totalTurnosIa: turnosIa,
+      notaGeral: null,
+      veredito: 'erro',
+      resumoAvaliacao: err.message,
+      violacoes: [],
+      pontosPositivos: [],
+      modeloAvaliador,
+      jobExecutionId,
     })
-    return { ok: false, action: 'pendente', motivo: 'erro_modelo' }
+    return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
   // 7. Valida JSON
   if (!aiResult || typeof aiResult.nota_geral !== 'number' || !aiResult.veredito) {
     console.error(`[iaFeedbackJob] Resposta inválida da IA para lead=${leadId}:`, JSON.stringify(aiResult)?.slice(0, 200))
-    await savePendente(sbFeedback, {
-      leadId, telefone, detectedAt, motivo: 'erro_modelo',
-      conversa: messages, jobExecutionId,
+    await saveAvaliacao(sbFeedback, {
+      leadId, telefone, pipelineIdFrom, statusIdFrom, detectedAt,
+      conversaCompleta: messages,
+      totalMensagens: messages.length,
+      totalTurnosIa: turnosIa,
+      notaGeral: null,
+      veredito: 'erro',
+      resumoAvaliacao: 'Resposta da IA não veio em JSON valido',
+      violacoes: [],
+      pontosPositivos: [],
+      modeloAvaliador,
+      jobExecutionId,
     })
-    return { ok: false, action: 'pendente', motivo: 'erro_modelo' }
+    return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
   // 8. Grava em ia_feedback

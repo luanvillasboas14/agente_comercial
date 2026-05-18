@@ -1,5 +1,13 @@
 -- Feedback IA — tabelas no Supabase de Feedback (SUPABASE_URL_FEEDBACK)
 -- Rode manualmente uma única vez.
+--
+-- Se voce rodou a versao anterior do schema (com ia_feedback_pendente),
+-- pode dropar a tabela que ficou sem uso:
+-- drop table if exists ia_feedback_pendente cascade;
+--
+-- Se voce rodou a versao anterior do schema (com pendentes_saved em job_runs),
+-- pode remover a coluna que ficou sem uso:
+-- alter table ia_feedback_job_runs drop column if exists pendentes_saved;
 
 create table if not exists ia_feedback (
   id bigserial primary key,
@@ -13,7 +21,7 @@ create table if not exists ia_feedback (
   total_mensagens int default 0,
   total_turnos_ia int default 0,
   nota_geral numeric(3,1),
-  veredito text, -- aprovado | parcial | reprovado
+  veredito text, -- aprovado | parcial | reprovado | erro
   resumo_avaliacao text,
   violacoes jsonb, -- [{regra, titulo, descricao, citacao, severidade}]
   pontos_positivos jsonb,
@@ -25,17 +33,6 @@ create table if not exists ia_feedback (
 create index if not exists ia_feedback_lead_id_idx on ia_feedback (lead_id);
 create index if not exists ia_feedback_created_at_idx on ia_feedback (created_at desc);
 
-create table if not exists ia_feedback_pendente (
-  id bigserial primary key,
-  lead_id bigint,
-  telefone text,
-  detected_at timestamptz not null,
-  motivo_pendencia text, -- sem_conversa | conversa_curta | ia_falhou | erro_modelo
-  conversa_pendente jsonb,
-  job_execution_id uuid,
-  created_at timestamptz default now()
-);
-
 create table if not exists ia_feedback_job_runs (
   id bigserial primary key,
   started_at timestamptz default now(),
@@ -45,7 +42,6 @@ create table if not exists ia_feedback_job_runs (
   trigger text, -- scheduler_diff | manual
   leads_detectados int default 0,
   avaliacoes_inseridas int default 0,
-  pendentes_saved int default 0,
   ai_calls int default 0,
   errors_count int default 0,
   steps jsonb

@@ -31,18 +31,6 @@ export async function loadAvaliacao(id) {
   }
 }
 
-export async function loadPendentes({ page = 1, limit = 20 } = {}) {
-  try {
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) })
-    const res = await fetch(`${BASE}/pendentes?${params}`)
-    if (!res.ok) return { rows: [], total: 0 }
-    return await res.json()
-  } catch (e) {
-    console.error('[iaFeedbackStore] loadPendentes error:', e.message)
-    return { rows: [], total: 0 }
-  }
-}
-
 export async function loadRuns(limit = 20) {
   try {
     const res = await fetch(`${BASE}/runs?limit=${limit}`)
@@ -67,12 +55,12 @@ export async function loadStatus() {
   }
 }
 
-export async function avaliarManual(leadId, telefone) {
+export async function avaliarManual({ lead_id, telefone } = {}) {
   try {
     const res = await fetch(`${BASE}/avaliar-manual`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lead_id: leadId, telefone }),
+      body: JSON.stringify({ lead_id, telefone }),
     })
     if (!res.ok) {
       const err = await res.text().catch(() => '')

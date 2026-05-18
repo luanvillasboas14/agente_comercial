@@ -1881,26 +1881,6 @@ app.get('/api/ia-feedback/avaliacoes/:id', async (req, res) => {
   }
 })
 
-app.get('/api/ia-feedback/pendentes', async (req, res) => {
-  try {
-    const db = makeIaFeedbackSupabaseClient(process.env)
-    if (!db) return res.status(500).json({ error: 'SUPABASE_URL_FEEDBACK não configurado' })
-
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)))
-    const page = Math.max(1, Number(req.query.page || 1))
-    const offset = (page - 1) * limit
-
-    const rows = await db.select(
-      'ia_feedback_pendente',
-      `select=id,lead_id,telefone,motivo_pendencia,detected_at,created_at&order=created_at.desc&limit=${limit}&offset=${offset}`,
-    )
-    res.json({ rows: rows || [], page, limit })
-  } catch (e) {
-    console.error('[ia-feedback/pendentes]', e.message)
-    res.status(500).json({ error: e.message })
-  }
-})
-
 app.get('/api/ia-feedback/runs', async (req, res) => {
   try {
     const db = makeIaFeedbackSupabaseClient(process.env)

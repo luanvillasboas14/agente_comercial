@@ -104,7 +104,6 @@ async function processNext() {
   let status = 'success'
   let errorMsg = null
   let avaliacoesInseridas = 0
-  let pendentesSaved = 0
   let aiCalls = 0
   let errorsCount = 0
   const steps = [{ type: 'start', at: startedAt.toISOString(), lead_id: item.leadId }]
@@ -123,12 +122,15 @@ async function processNext() {
       avaliacoesInseridas = 1
       aiCalls = 1
       steps.push({ type: 'avaliado', lead_id: item.leadId, nota: result.nota, veredito: result.veredito })
-    } else {
-      pendentesSaved = 1
-      steps.push({ type: 'pendente', lead_id: item.leadId, motivo: result.motivo })
+    } else if (result.action === 'erro') {
+      avaliacoesInseridas = 1
+      errorsCount = 1
+      steps.push({ type: 'erro', lead_id: item.leadId, motivo: result.motivo })
+    } else if (result.action === 'skipped') {
+      steps.push({ type: 'skipped', lead_id: item.leadId, motivo: result.motivo })
     }
 
-    if (!result.ok) {
+    if (!result.ok && result.action !== 'erro') {
       errorsCount = 1
     }
   } catch (err) {
@@ -151,7 +153,6 @@ async function processNext() {
           status,
           duration_ms: durationMs,
           avaliacoes_inseridas: avaliacoesInseridas,
-          pendentes_saved: pendentesSaved,
           ai_calls: aiCalls,
           errors_count: errorsCount,
           steps,

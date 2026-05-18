@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   AlertTriangle, CheckCircle, Clock, MessageSquare,
-  Bot, ListChecks, Search, Loader,
+  Bot, ListChecks, Search, Loader, RotateCcw,
 } from 'lucide-react'
 import {
   loadAvaliacoes,
   loadAvaliacao,
-  loadPendentes,
   loadRuns,
   loadStatus,
+  avaliarManual,
 } from '../lib/iaFeedbackStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ function VeredictoBadge({ veredito }) {
     aprovado: { background: 'oklch(72% 0.14 155 / 0.15)', color: 'oklch(40% 0.14 155)', border: 'oklch(72% 0.14 155 / 0.35)' },
     parcial: { background: 'oklch(78% 0.14 75 / 0.15)', color: 'oklch(45% 0.14 75)', border: 'oklch(78% 0.14 75 / 0.35)' },
     reprovado: { background: 'oklch(68% 0.20 25 / 0.15)', color: 'oklch(40% 0.20 25)', border: 'oklch(68% 0.20 25 / 0.35)' },
+    erro: { background: 'oklch(40% 0.05 265 / 0.12)', color: 'oklch(55% 0.05 265)', border: 'oklch(55% 0.05 265 / 0.35)' },
   }
   const s = styles[veredito] || { background: 'var(--bg-2)', color: 'var(--fg-3)', border: 'var(--line-1)' }
   return (
@@ -48,6 +49,7 @@ function VeredictoBadge({ veredito }) {
       {veredito === 'aprovado' && <CheckCircle size={10} />}
       {veredito === 'parcial' && <AlertTriangle size={10} />}
       {veredito === 'reprovado' && <AlertTriangle size={10} />}
+      {veredito === 'erro' && <AlertTriangle size={10} />}
       {veredito || '-'}
     </span>
   )
@@ -292,7 +294,6 @@ export default function FeedbackIAViewer() {
   const [tab, setTab] = useState('avaliacoes')
   const [status, setStatus] = useState(null)
   const [avaliacoes, setAvaliacoes] = useState([])
-  const [pendentes, setPendentes] = useState([])
   const [runs, setRuns] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -305,19 +306,20 @@ export default function FeedbackIAViewer() {
   // Detalhe expandido
   const [expandedId, setExpandedId] = useState(null)
 
+  // Reavaliar erro
+  const [reavaliadoId, setReavaliadoId] = useState(null)
+
   const fetchAll = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true)
     else setRefreshing(true)
     try {
-      const [st, av, pend, runsData] = await Promise.all([
+      const [st, av, runsData] = await Promise.all([
         loadStatus(),
         loadAvaliacoes({ page, limit: 15, veredito: filterVeredito || undefined, leadId: filterLeadId || undefined }),
-        loadPendentes({ page: 1, limit: 15 }),
         loadRuns(10),
       ])
       setStatus(st)
       setAvaliacoes(av.rows || [])
-      setPendentes(pend.rows || [])
       setRuns(Array.isArray(runsData) ? runsData : [])
     } finally {
       setLoading(false)
@@ -426,21 +428,12 @@ export default function FeedbackIAViewer() {
           tone={runner.queueSize > 0 ? 'warning' : 'muted'}
           hint={runner.running ? `Avaliando #${runner.currentLeadId}` : 'Aguardando'}
         />
-        <KPICard
-          icon={AlertTriangle}
-          label="Pendentes"
-          value={pendentes.length}
-          tone={pendentes.length > 0 ? 'warning' : 'muted'}
-        />
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         <TabButton active={tab === 'avaliacoes'} onClick={() => setTab('avaliacoes')}>
           Avaliações ({avaliacoes.length})
-        </TabButton>
-        <TabButton active={tab === 'pendentes'} onClick={() => setTab('pendentes')}>
-          Pendentes ({pendentes.length})
         </TabButton>
         <TabButton active={tab === 'runs'} onClick={() => setTab('runs')}>
           Execuções ({runs.length})
@@ -476,6 +469,7 @@ export default function FeedbackIAViewer() {
               <option value="aprovado">Aprovado</option>
               <option value="parcial">Parcial</option>
               <option value="reprovado">Reprovado</option>
+              <option value="erro">Erro</option>
             </select>
             <button
               onClick={handleFilter}
@@ -525,7 +519,7 @@ export default function FeedbackIAViewer() {
                   >
                     <VeredictoBadge veredito={av.veredito} />
                     <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', fontVariantNumeric: 'tabular-nums' }}>
-                      {av.nota_geral != null ? `${Number(av.nota_geral).toFixed(1)}` : '-'}
+                      {av.nota_geral != null ? `${Number(av.nota_geral).toFixed(1)}` : '—'}
                       <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--fg-3)' }}>/10</span>
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Lead #{av.lead_id}</span>
@@ -534,6 +528,30 @@ export default function FeedbackIAViewer() {
                     <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>
                       {av.total_turnos_ia ?? '-'} turnos IA
                     </span>
+                    {av.veredito === 'erro' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setReavaliadoId(av.id)
+                          avaliarManual({ lead_id: av.lead_id, telefone: av.telefone })
+                            .then(() => fetchAll(false))
+                            .finally(() => setReavaliadoId(null))
+                        }}
+                        disabled={reavaliadoId === av.id}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                          background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+                          color: 'var(--fg-2)', cursor: reavaliadoId === av.id ? 'not-allowed' : 'pointer',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {reavaliadoId === av.id
+                          ? <Loader size={10} className="spin" />
+                          : <RotateCcw size={10} />}
+                        Reavaliar
+                      </button>
+                    )}
                     {expandedId === av.id ? <ChevronDown size={14} style={{ color: 'var(--fg-3)' }} /> : <ChevronRight size={14} style={{ color: 'var(--fg-3)' }} />}
                   </div>
                   {expandedId === av.id && (
@@ -576,41 +594,6 @@ export default function FeedbackIAViewer() {
         </div>
       )}
 
-      {/* Tab: Pendentes */}
-      {tab === 'pendentes' && (
-        <div>
-          {pendentes.length === 0 ? (
-            <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
-              <CheckCircle size={24} style={{ opacity: 0.4, marginBottom: 8 }} />
-              <div>Nenhum pendente no momento.</div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {pendentes.map((p) => (
-                <div key={p.id} style={{
-                  padding: '10px 14px', borderRadius: 10, background: 'var(--bg-2)',
-                  border: '1px solid var(--line-1)',
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <AlertTriangle size={14} style={{ color: 'var(--warn)', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-1)' }}>
-                      Lead #{p.lead_id}
-                      {p.telefone && <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}> · {p.telefone}</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>
-                      Motivo: <span style={{ fontWeight: 600 }}>{p.motivo_pendencia || '-'}</span>
-                      {' · '}Detectado: {formatTime(p.detected_at)}
-                      {' · '}Salvo: {formatTime(p.created_at)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Tab: Runs */}
       {tab === 'runs' && (
         <div>
@@ -638,7 +621,7 @@ export default function FeedbackIAViewer() {
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>
                       {r.duration_ms != null && `${formatDuration(r.duration_ms)} · `}
-                      {r.avaliacoes_inseridas ?? 0} avaliadas · {r.pendentes_saved ?? 0} pendentes · {r.errors_count ?? 0} erros
+                      {r.avaliacoes_inseridas ?? 0} avaliadas · {r.errors_count ?? 0} erros
                     </div>
                   </div>
                   <span style={{
