@@ -115,6 +115,20 @@ export async function rejectProposal(id) {
   return apiFetch(`${BASE}/proposals/${id}/reject`, { method: 'POST' })
 }
 
+export async function reanalyzeProposal(id, instrucaoExtra) {
+  const res = await fetch(`${BASE}/proposals/${id}/reanalyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instrucao_extra: instrucaoExtra }),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    const detail = text ? (JSON.parse(text).error || text) : `HTTP ${res.status}`
+    throw new Error(detail)
+  }
+  return text ? JSON.parse(text) : {}
+}
+
 export async function loadPromptVersions() {
   return apiFetch(`${BASE}/prompt-versions`)
 }

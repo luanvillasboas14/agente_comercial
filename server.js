@@ -2060,6 +2060,60 @@ app.post('/api/ia-feedback/proposals/:id/reject', async (req, res) => {
   }
 })
 
+app.post('/api/ia-feedback/proposals/:id/reanalyze', async (req, res) => {
+  try {
+    const { instrucao_extra } = req.body || {}
+    if (!instrucao_extra || typeof instrucao_extra !== 'string' || !instrucao_extra.trim()) {
+      return res.status(400).json({ error: 'instrucao_extra é obrigatório (texto explicando o que estava errado na proposta anterior)' })
+    }
+
+    const propostaAntiga = await getProposalById(process.env, req.params.id)
+    if (!propostaAntiga) return res.status(404).json({ error: 'Proposta não encontrada' })
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+
+    const rankingData = await getViolationsRanking(process.env, { activeVersion, limit: 100 })
+    const regraNoRanking = rankingData.ranking.find((r) => r.regra === propostaAntiga.regra_alvo)
+    if (!regraNoRanking) {
+      return res.status(400).json({
+        error: `"${propostaAntiga.regra_alvo}" não tem mais violações na janela atual. Não há base para reanálise.`,
+      })
+    }
+
+    const proposalData = await analyzeRule(process.env, {
+      regraAlvo: propostaAntiga.regra_alvo,
+      ranking: rankingData,
+      activeVersion,
+      instrucaoExtra: instrucao_extra.trim(),
+    })
+
+    if (propostaAntiga.status === 'pendente') {
+      await markProposalRejected(process.env, propostaAntiga.id)
+    }
+
+    const novaProposta = await createProposal(process.env, {
+      baseada_em_versao_id: activeVersion.id,
+      modelo_analisador: resolveModel(process.env, 'prompt_optimizer'),
+      regra_alvo: proposalData.regra_alvo,
+      tipo_mudanca: proposalData.tipo_mudanca,
+      trecho_antes: proposalData.trecho_antes || '',
+      trecho_depois: proposalData.trecho_depois || '',
+      justificativa: proposalData.justificativa,
+      conflitos_potenciais: proposalData.conflitos_potenciais || null,
+      exemplos_violacoes: regraNoRanking.exemplos,
+      total_violacoes: regraNoRanking.count,
+      janela_de: rankingData.janela_de,
+      janela_ate: rankingData.janela_ate,
+    })
+
+    res.json({ ok: true, nova_proposta: novaProposta, proposta_antiga_rejeitada: propostaAntiga.id })
+  } catch (e) {
+    console.error('[ia-feedback/proposals/:id/reanalyze]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
 app.get('/api/ia-feedback/prompt-versions', async (req, res) => {
   try {
     const versions = await listVersions(process.env, { limit: 50 })

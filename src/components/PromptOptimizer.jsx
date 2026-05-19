@@ -10,6 +10,7 @@ import {
   loadProposals,
   acceptProposal,
   rejectProposal,
+  reanalyzeProposal,
   loadPromptVersions,
   loadPromptVersionById,
   rollbackPromptVersion,
@@ -254,6 +255,9 @@ function VersionHistory({ onVersionActivated }) {
 function ProposalCard({ proposal, onAccepted, onRejected }) {
   const [accepting, setAccepting] = useState(false)
   const [rejecting, setRejecting] = useState(false)
+  const [reanalyzing, setReanalyzing] = useState(false)
+  const [showReanalyzeBox, setShowReanalyzeBox] = useState(false)
+  const [instrucaoExtra, setInstrucaoExtra] = useState('')
   const [exemploOpen, setExemploOpen] = useState(false)
   const [error, setError] = useState(null)
 
@@ -282,6 +286,23 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
       setError(e.message)
     } finally {
       setRejecting(false)
+    }
+  }
+
+  async function handleReanalyze() {
+    if (!instrucaoExtra.trim()) {
+      setError('Escreva uma instrução explicando o que estava errado na proposta atual.')
+      return
+    }
+    setError(null)
+    setReanalyzing(true)
+    try {
+      await reanalyzeProposal(proposal.id, instrucaoExtra.trim())
+      onRejected?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setReanalyzing(false)
     }
   }
 
@@ -463,36 +484,91 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
 
         {/* Ações */}
         {proposal.status === 'pendente' && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={handleAccept}
-              disabled={accepting || rejecting}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                background: accepting ? 'var(--bg-2)' : 'oklch(72% 0.14 155 / 0.18)',
-                border: '1px solid oklch(72% 0.14 155 / 0.40)',
-                color: 'oklch(35% 0.14 155)',
-                cursor: accepting || rejecting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {accepting ? <Loader size={12} className="spin" /> : <CheckCircle size={12} />}
-              Aceitar e aplicar
-            </button>
-            <button
-              onClick={handleReject}
-              disabled={accepting || rejecting}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-                background: 'var(--bg-1)', border: '1px solid var(--line-1)',
-                color: 'var(--fg-3)',
-                cursor: accepting || rejecting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {rejecting ? <Loader size={12} className="spin" /> : <X size={12} />}
-              Rejeitar
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={handleAccept}
+                disabled={accepting || rejecting || reanalyzing}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  background: accepting ? 'var(--bg-2)' : 'oklch(72% 0.14 155 / 0.18)',
+                  border: '1px solid oklch(72% 0.14 155 / 0.40)',
+                  color: 'oklch(35% 0.14 155)',
+                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {accepting ? <Loader size={12} className="spin" /> : <CheckCircle size={12} />}
+                Aceitar e aplicar
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={accepting || rejecting || reanalyzing}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                  background: 'var(--bg-1)', border: '1px solid var(--line-1)',
+                  color: 'var(--fg-3)',
+                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {rejecting ? <Loader size={12} className="spin" /> : <X size={12} />}
+                Rejeitar
+              </button>
+              <button
+                onClick={() => setShowReanalyzeBox((p) => !p)}
+                disabled={accepting || rejecting || reanalyzing}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                  background: 'oklch(78% 0.14 75 / 0.12)', border: '1px solid oklch(78% 0.14 75 / 0.35)',
+                  color: 'oklch(40% 0.14 75)',
+                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Wand2 size={12} />
+                {showReanalyzeBox ? 'Cancelar reanálise' : 'Rejeitar e reanalisar com dica'}
+              </button>
+            </div>
+            {showReanalyzeBox && (
+              <div style={{
+                padding: 10, borderRadius: 8,
+                background: 'oklch(78% 0.14 75 / 0.06)', border: '1px solid oklch(78% 0.14 75 / 0.25)',
+                display: 'flex', flexDirection: 'column', gap: 8,
+              }}>
+                <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                  Explique o que estava errado na proposta atual. Ex.: "O problema é do subitem 13c (a IA ofereceu grade sem ter), não do 13d." O analisador vai usar essa dica + a conversa completa pra refazer a proposta.
+                </div>
+                <textarea
+                  value={instrucaoExtra}
+                  onChange={(e) => setInstrucaoExtra(e.target.value)}
+                  placeholder="Sua dica..."
+                  rows={3}
+                  style={{
+                    width: '100%', padding: 8, borderRadius: 6,
+                    background: 'var(--bg-1)', border: '1px solid var(--line-1)',
+                    color: 'var(--fg-1)', fontSize: 12, fontFamily: 'inherit', resize: 'vertical',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  onClick={handleReanalyze}
+                  disabled={reanalyzing || !instrucaoExtra.trim()}
+                  style={{
+                    alignSelf: 'flex-start',
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '6px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                    background: 'oklch(78% 0.14 75 / 0.20)', border: '1px solid oklch(78% 0.14 75 / 0.45)',
+                    color: 'oklch(35% 0.14 75)',
+                    cursor: reanalyzing || !instrucaoExtra.trim() ? 'not-allowed' : 'pointer',
+                    opacity: reanalyzing ? 0.6 : 1,
+                  }}
+                >
+                  {reanalyzing ? <Loader size={11} className="spin" /> : <Wand2 size={11} />}
+                  {reanalyzing ? 'Reanalisando...' : 'Gerar nova proposta'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

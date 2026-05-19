@@ -82,3 +82,30 @@ export async function getViolationsRanking(env, { activeVersion, limit = 100 }) 
     ranking,
   }
 }
+
+/**
+ * Busca a conversa_completa de uma lista de ia_feedback IDs.
+ * Retorna um Map<feedback_id, conversa_completa>.
+ *
+ * Pra economizar tokens, NÃO usar isso no ranking geral. Usar APENAS no analyzeRule.
+ */
+export async function fetchConversationsByFeedbackIds(env, feedbackIds) {
+  if (!Array.isArray(feedbackIds) || feedbackIds.length === 0) return new Map()
+  const sb = getFeedbackSupabase(env)
+  if (!sb) throw new Error('[violationsRanking/config] SUPABASE_URL_FEEDBACK não configurado')
+  const idsCsv = feedbackIds.map((id) => encodeURIComponent(String(id))).join(',')
+  try {
+    const rows = await sb.select(
+      'ia_feedback',
+      `select=id,conversa_completa&id=in.(${idsCsv})`,
+    )
+    const map = new Map()
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      map.set(r.id, r.conversa_completa)
+    }
+    return map
+  } catch (err) {
+    console.warn(`[violationsRanking/conversation] Falha ao buscar conversas: ${err.message}`)
+    return new Map()
+  }
+}

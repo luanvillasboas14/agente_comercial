@@ -4,6 +4,7 @@
  */
 
 import { resolveModel } from '../ai/modelRegistry.js'
+import { fetchConversationsByFeedbackIds } from './violationsRanking.js'
 
 // ─── HTTP com timeout ─────────────────────────────────────────────────────────
 
@@ -84,6 +85,17 @@ ENTRADA QUE VOCÊ RECEBE:
 Trechos entre marcadores <!-- IMUTÁVEL --> e <!-- /IMUTÁVEL --> NÃO podem ser modificados — são a constituição do agente.
 
 REGRAS DA SUA PROPOSTA:
+0. ANTES DE TUDO: identifique o SUBITEM exato da regra que está sendo violado.
+
+   Regras complexas como 13 ou 14 têm vários subitens (a, b, c, d, e, f...). Cada subitem trata de um caso diferente. Violar 13c (a IA ofereceu grade sem ter) é completamente diferente de violar 13d (resposta a pedido do lead). Você DEVE:
+
+   - Ler a CONVERSA COMPLETA dos exemplos (não só a citação) pra entender o contexto.
+   - Identificar qual subitem específico (ex: 13c, 13f) está sendo violado.
+   - O trecho_antes que você vai propor mudar DEVE pertencer a esse subitem específico. Não mude um subitem que não está sendo violado.
+   - Iniciar a justificativa com "Subitem violado: <X>."
+
+   Se você não conseguir identificar o subitem com certeza (ex: a citação é ambígua e a conversa não ajuda), retorne tipo_mudanca="nenhuma" com justificativa explicando a ambiguidade.
+
 1. Cirurgia, não cirurgia plástica: modifique o mínimo necessário. Prefira adicionar uma exceção curta a reescrever a regra inteira.
 2. Mantenha o tom: o agente fala em português brasileiro informal-profissional. Não use jargão técnico nem linguagem corporativa.
 3. Consolide quando possível: se a regra já está inchada (>200 palavras), considere remover redundâncias em vez de adicionar texto.
@@ -108,12 +120,52 @@ SAÍDA: JSON estrito, somente o objeto, sem markdown nem comentários:
   "conflitos_potenciais": "<texto descrevendo conflito ou null>"
 }`
 
-function buildUserMessage({ agentRulesText, versao, regraAlvo, ruleText, exemplos, totalViolacoes }) {
-  const exemploLines = exemplos.map((ex, i) => {
-    return `#${i + 1}. execution_id: ${ex.execution_id || 'n/a'} | severidade: ${ex.severidade}
-  citação: "${ex.citacao}"
-  descrição: ${ex.descricao}`
-  }).join('\n\n')
+function formatTurn(turn) {
+  if (!turn || typeof turn !== 'object') return ''
+  const from = String(turn.from || turn.role || '').toLowerCase()
+  const text = String(turn.text || turn.content || '').slice(0, 500)
+  const exec = turn.execution_id ? ` (EX-${turn.execution_id})` : ''
+  const tools = Array.isArray(turn.tools) && turn.tools.length ? ` [tools: ${turn.tools.join(', ')}]` : ''
+  const tag = from === 'lead' || from === 'user' ? 'LEAD'
+    : from === 'ia' || from === 'assistant' ? 'IA'
+    : from.toUpperCase() || 'MSG'
+  return `${tag}${exec}${tools}: ${text}`
+}
+
+function formatConversa(conversa) {
+  if (!Array.isArray(conversa) || conversa.length === 0) return '(conversa vazia ou indisponível)'
+  return conversa.map(formatTurn).filter(Boolean).join('\n')
+}
+
+function buildUserMessage({
+  agentRulesText, versao, regraAlvo, ruleText,
+  exemplosComConversa, exemplosResumidos, conversasMap,
+  totalViolacoes, instrucaoExtra,
+}) {
+  const blocosComConversa = exemplosComConversa.map((ex, i) => {
+    const conversa = conversasMap.get(ex.feedback_id)
+    return `### Exemplo ${i + 1} (severidade: ${ex.severidade}, execution_id: ${ex.execution_id || 'n/a'})
+
+Citação do turno onde o avaliador detectou a violação:
+"${ex.citacao}"
+
+Descrição do avaliador:
+${ex.descricao}
+
+CONVERSA COMPLETA onde isso aconteceu (turnos em ordem cronológica):
+
+${formatConversa(conversa)}`
+  }).join('\n\n---\n\n')
+
+  const blocoResumidos = exemplosResumidos.length === 0 ? '' : `
+
+Exemplos adicionais (apenas citação, sem conversa completa):
+${exemplosResumidos.map((ex, i) => `${i + 1}. [${ex.severidade}] execution_id=${ex.execution_id || 'n/a'} — "${ex.citacao}" — ${ex.descricao}`).join('\n')}`
+
+  const blocoInstrucaoExtra = instrucaoExtra ? `
+
+INSTRUÇÃO ADICIONAL DO ADMIN (você está sendo reanalisado porque a proposta anterior estava errada):
+${instrucaoExtra}` : ''
 
   return `PROMPT INTEIRO ATUAL (versão ${versao}):
 
@@ -123,17 +175,23 @@ ${agentRulesText}
 
 REGRA-ALVO: ${regraAlvo}
 
-TEXTO LITERAL DA REGRA-ALVO:
+TEXTO LITERAL DA REGRA-ALVO (esta regra pode ter vários subitens — a, b, c, d, e, f...; identifique EXATAMENTE qual subitem está sendo violado):
 
 ---
 ${ruleText}
 ---
 
-VIOLAÇÕES OBSERVADAS (últimas ${exemplos.length} exemplos na janela após a versão atual):
+VIOLAÇÕES OBSERVADAS — total na janela: ${totalViolacoes}. Abaixo, os exemplos mais relevantes (priorizados por severidade):
 
-${exemploLines || '(nenhum exemplo disponível)'}
+${blocosComConversa || '(nenhum exemplo disponível)'}${blocoResumidos}${blocoInstrucaoExtra}
 
-Total: ${totalViolacoes} violações dessa regra na janela.
+Antes de responder, faça em silêncio:
+1. Leia a CONVERSA COMPLETA dos exemplos com conversa. NÃO confie só na citação isolada — o contexto do turno anterior muda tudo.
+2. Identifique exatamente QUAL SUBITEM da regra (ex: "13c" ou "13d" ou "13f") está sendo violado em cada exemplo.
+3. Verifique se múltiplos exemplos violam subitens diferentes — se sim, escolha o subitem com mais ocorrências.
+4. Só então decida o trecho_antes (cópia LITERAL do subitem ofendido) e o trecho_depois.
+
+Na sua justificativa, INICIE indicando o subitem identificado. Ex: "Subitem violado: 13c. Os exemplos mostram que a IA ofereceu grade sem ter visto o marcador DISPONIVEL..."
 
 Retorne sua proposta no formato JSON especificado.`
 }
@@ -176,7 +234,7 @@ function findFlexibleMatch(haystack, needle) {
  * @param {{ regraAlvo: string, ranking: object, activeVersion: object }} opts
  * @returns {Promise<object>} Objeto da proposta validado
  */
-export async function analyzeRule(env, { regraAlvo, ranking, activeVersion }) {
+export async function analyzeRule(env, { regraAlvo, ranking, activeVersion, instrucaoExtra = null }) {
   const agentRulesText = activeVersion.agent_rules_text
 
   // 1. Extrai trecho da regra
@@ -201,6 +259,20 @@ export async function analyzeRule(env, { regraAlvo, ranking, activeVersion }) {
   const exemplos = regraData?.exemplos ?? []
   const totalViolacoes = regraData?.count ?? 0
 
+  // 3b. Ordena por relevância e busca conversa completa para os 2 primeiros
+  const ordenadosPorRelevancia = [...exemplos].sort((a, b) => {
+    const sevOrder = { alta: 3, media: 2, baixa: 1 }
+    const sevDiff = (sevOrder[b.severidade] || 0) - (sevOrder[a.severidade] || 0)
+    if (sevDiff !== 0) return sevDiff
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''))
+  })
+  const exemplosComConversa = ordenadosPorRelevancia.slice(0, 2)
+  const exemplosResumidos = ordenadosPorRelevancia.slice(2, 5)
+  const feedbackIds = exemplosComConversa.map((e) => e.feedback_id).filter(Boolean)
+  const conversasMap = feedbackIds.length > 0
+    ? await fetchConversationsByFeedbackIds(env, feedbackIds)
+    : new Map()
+
   // 4. Resolve modelo
   const model = resolveModel(env, 'prompt_optimizer')
   const key = env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || ''
@@ -219,8 +291,11 @@ export async function analyzeRule(env, { regraAlvo, ranking, activeVersion }) {
           versao: activeVersion.versao,
           regraAlvo,
           ruleText,
-          exemplos,
+          exemplosComConversa,
+          exemplosResumidos,
+          conversasMap,
           totalViolacoes,
+          instrucaoExtra: instrucaoExtra || null,
         }),
       },
     ],
