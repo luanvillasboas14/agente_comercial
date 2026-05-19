@@ -103,6 +103,107 @@ async function fetchChatMessages(env, { leadId, telefone }) {
   return Array.isArray(rows) ? rows : []
 }
 
+/* ───────────── Leitura de mensagens_ia (execuções da IA) ───────────── */
+
+/**
+ * Busca execuções do agente (tabela mensagens_ia) para um lead.
+ * Filtro: usage->>lead_id == leadId (campo dentro do JSONB usage).
+ *
+ * Cada execução tem:
+ *   - id: 'EX-YYMMDD-HHMM-NNN'
+ *   - response: texto que a IA gerou
+ *   - tool_calls: array de tools chamadas [{ name: 'buscar_informacoes', ... }, ...]
+ *   - created_at: timestamp
+ *   - usage: { lead_id, telefone, ... }
+ */
+async function fetchAgentExecutions(env, { leadId, limit = 200 }) {
+  const url = (env.SUPABASE_URL || '').replace(/\/$/, '')
+  const key = env.SUPABASE_KEY || ''
+  if (!url || !key || !leadId) return []
+
+  const sb = makeSupabaseClient(url, key, { timeoutMs: 30_000 })
+  try {
+    // usage->>lead_id força string no JSONB; o Supabase aceita comparar com string
+    const rows = await sb.select(
+      'mensagens_ia',
+      `select=id,response,tool_calls,created_at,usage&usage->>lead_id=eq.${leadId}&order=created_at.asc&limit=${Math.max(1, Number(limit))}`,
+    )
+    return Array.isArray(rows) ? rows : []
+  } catch (err) {
+    console.warn(`[iaFeedbackJob] Falha ao buscar mensagens_ia para lead=${leadId}: ${err.message}`)
+    return []
+  }
+}
+
+/**
+ * Cruza chat_messages.bot_message com mensagens_ia.response/created_at.
+ *
+ * Estratégia (em ordem de prioridade):
+ *   1. Match exato: response === bot_message
+ *   2. Match por prefixo: response.startsWith(bot_message[0..80]) ou vice-versa
+ *      (cobre casos onde houve trim/normalização entre a geração e a gravação)
+ *   3. Match temporal: execução cujo created_at está dentro de ±120s do bot_message,
+ *      em ordem cronológica, consumindo execuções já matched
+ *
+ * Retorna o mesmo array `messages` com 2 campos novos em cada item que teve match:
+ *   - executionId: string (ex: 'EX-260519-1226-289')
+ *   - toolsUsed: string[] (nomes únicos das tools chamadas)
+ *
+ * Mensagens sem match continuam sem esses campos (UI/prompt tratam ausência).
+ */
+function matchMessagesWithExecutions(messages, executions) {
+  if (!Array.isArray(messages) || !Array.isArray(executions) || executions.length === 0) {
+    return messages
+  }
+
+  const used = new Set()
+  const findExactOrPrefix = (botMessage) => {
+    const bm = String(botMessage || '').trim()
+    if (!bm) return -1
+    for (let i = 0; i < executions.length; i++) {
+      if (used.has(i)) continue
+      const resp = String(executions[i].response || '').trim()
+      if (!resp) continue
+      if (resp === bm) return i
+      const prefixLen = Math.min(80, Math.min(resp.length, bm.length))
+      if (prefixLen > 20 && resp.slice(0, prefixLen) === bm.slice(0, prefixLen)) return i
+    }
+    return -1
+  }
+
+  const findByTime = (createdAt) => {
+    const t = new Date(createdAt).getTime()
+    if (!Number.isFinite(t)) return -1
+    let best = -1
+    let bestDelta = Infinity
+    for (let i = 0; i < executions.length; i++) {
+      if (used.has(i)) continue
+      const et = new Date(executions[i].created_at).getTime()
+      if (!Number.isFinite(et)) continue
+      const delta = Math.abs(et - t)
+      if (delta < bestDelta && delta <= 120_000) {
+        bestDelta = delta
+        best = i
+      }
+    }
+    return best
+  }
+
+  return messages.map((msg) => {
+    if (!msg.bot_message || !String(msg.bot_message).trim()) return msg
+
+    let idx = findExactOrPrefix(msg.bot_message)
+    if (idx < 0) idx = findByTime(msg.created_at)
+    if (idx < 0) return msg
+
+    used.add(idx)
+    const exec = executions[idx]
+    const toolsRaw = Array.isArray(exec.tool_calls) ? exec.tool_calls : []
+    const toolsUsed = [...new Set(toolsRaw.map((tc) => String(tc?.name || tc?.tool || '').trim()).filter(Boolean))]
+    return { ...msg, executionId: exec.id, toolsUsed }
+  })
+}
+
 /* ───────────── Formatação da conversa ───────────── */
 
 function formatTimestamp(iso) {
@@ -131,7 +232,12 @@ function buildConversaFormatada(messages) {
       lines.push(`${prefix}LEAD: ${String(msg.user_message).trim()}`)
     }
     if (msg.bot_message && String(msg.bot_message).trim()) {
-      lines.push(`${prefix}IA: ${String(msg.bot_message).trim()}`)
+      const idPart = msg.executionId ? ` (${msg.executionId})` : ''
+      const toolsPart =
+        Array.isArray(msg.toolsUsed) && msg.toolsUsed.length > 0
+          ? ` [tools: ${msg.toolsUsed.join(', ')}]`
+          : ' [tools: nao registrado]'
+      lines.push(`${prefix}IA${idPart}${toolsPart}: ${String(msg.bot_message).trim()}`)
     }
   }
   return lines.join('\n')
@@ -143,16 +249,71 @@ const SYSTEM_PROMPT = `Você é um auditor de qualidade de uma IA de atendimento
 
 Sua tarefa: receber as REGRAS que a IA tinha que seguir e a CONVERSA que ela teve com um lead via WhatsApp. Avaliar SE a IA seguiu cada regra.
 
-INSTRUÇÕES:
-- Avalie SOMENTE as mensagens da IA (linhas marcadas como "IA:"). Não julgue o lead.
-- NÃO considere tempo de resposta — só conteúdo.
-- Para cada regra que aparecer violada, cite a mensagem exata da IA e explique por quê.
-- Severidade: "alta" (violação clara que prejudica o lead), "media" (violação parcial / ambígua), "baixa" (deslize pontual).
-- Veredito final:
-  • "aprovado" — nenhuma violação alta + no máximo 1 média.
-  • "parcial" — 1 violação alta OU 2-3 médias.
-  • "reprovado" — 2+ violações altas OU 4+ médias.
+═══════════════════════════════════════════════════════════════
+COMO LER A CONVERSA
+═══════════════════════════════════════════════════════════════
+
+Cada turno da IA aparece no formato:
+  [data hora] IA (EX-XXX...) [tools: nome1, nome2]: texto da resposta
+
+- O ID entre parênteses (ex: "EX-260519-1226-289") é o execution_id desse turno. Use-o para citar violações específicas.
+- "[tools: ...]" lista as tools que a IA REALMENTE chamou nesse turno. Você DEVE confiar nessa lista, NÃO chutar.
+- "[tools: nao registrado]" significa que não temos o log das tools para esse turno (não acuse "não usou X" nesses casos — você não sabe).
+
+═══════════════════════════════════════════════════════════════
+REGRAS DE OURO DA AVALIAÇÃO
+═══════════════════════════════════════════════════════════════
+
+1. Avalie SOMENTE as mensagens da IA. Não julgue o lead.
+2. NÃO considere tempo de resposta — só conteúdo.
+3. Quando "[tools: ...]" listar a tool X, a IA usou X. NÃO acuse a IA de "não ter usado a tool X" se ela está listada ali.
+4. Quando "[tools: nao registrado]" aparecer, NÃO infira tools a partir do texto. Marque essa parte como "parcial" com severidade baixa em vez de "violação".
+
+═══════════════════════════════════════════════════════════════
+ATENÇÃO À REGRA 3 (buscar_perguntas) — EVITAR FALSO POSITIVO
+═══════════════════════════════════════════════════════════════
+
+A Regra 3 obriga buscar_perguntas em DÚVIDAS GERAIS — mas tem EXCEÇÕES IMPORTANTES.
+
+NÃO é violação da Regra 3 quando:
+- A IA respondeu sobre PREÇO, DURAÇÃO, MODALIDADE, GRADE ou ESTÁGIO de um CURSO ESPECÍFICO citado pelo lead (essas perguntas pedem buscar_informacoes / buscar_precos / buscar_pos, NÃO buscar_perguntas).
+- A IA respondeu a cumprimento ("oi", "bom dia"), agradecimento ou despedida.
+- A IA respondeu a confirmação curta do lead ("sim", "ok", "pode", "quero", "beleza"). A regra 16 manda PROGREDIR sem buscar de novo.
+- A IA chamou distribuir_humano por pedido explícito do lead.
+
+Exemplos do que NÃO é violação:
+- Lead: "Quero saber sobre Administração" → IA chama buscar_informacoes e responde com curso, duração, modalidade. CORRETO.
+- Lead: "Quanto custa Enfermagem?" → IA chama buscar_precos e responde. CORRETO.
+- Lead: "Tem estágio em Farmácia?" → IA chama buscar_informacoes (que traz marcador [ESTAGIO]) e responde. CORRETO.
+
+Só acuse Regra 3 violada quando o lead fizer pergunta GENÉRICA sobre processos da empresa (matrícula, prazos, formas de pagamento, dispensa de matérias, TCC, etc.) E a tool buscar_perguntas NÃO aparecer em [tools: ...] do turno em que a IA respondeu.
+
+═══════════════════════════════════════════════════════════════
+CONTRADIÇÕES INTERNAS — VIOLAÇÃO GRAVE (SEMPRE SEVERIDADE ALTA)
+═══════════════════════════════════════════════════════════════
+
+A IA disse uma coisa num turno e o oposto em outro? Isso é uma das piores violações possíveis. Procure ativamente.
+
+Exemplos de contradições internas:
+- Ofereceu enviar a grade ("Quer que eu te envie o link da grade?") e em seguida disse que não tem ("Infelizmente, não temos o link da grade disponível").
+- Disse que tem desconto/bolsa num turno e que não tem em outro.
+- Confirmou um preço e depois deu outro.
+- Confirmou disponibilidade de polo/cidade e depois disse que não atende.
+
+Quando achar contradição: registra como violação com regra="Coerência" (ou cite as regras envolvidas se forem mais de uma), severidade="alta", e cite AMBAS as mensagens da IA no campo descricao. No campo citacao, coloque a mensagem mais flagrante das duas.
+
+═══════════════════════════════════════════════════════════════
+VEREDITO E NOTA
+═══════════════════════════════════════════════════════════════
+
+- "aprovado" — nenhuma violação alta + no máximo 1 média.
+- "parcial" — 1 violação alta OU 2-3 médias.
+- "reprovado" — 2+ violações altas OU 4+ médias.
 - Nota geral (0.0 a 10.0): considere quantidade e severidade das violações + qualidade geral do atendimento.
+
+═══════════════════════════════════════════════════════════════
+FORMATO DE SAÍDA (OBRIGATÓRIO)
+═══════════════════════════════════════════════════════════════
 
 Responda APENAS um JSON válido neste formato (sem texto antes/depois):
 {
@@ -165,11 +326,17 @@ Responda APENAS um JSON válido neste formato (sem texto antes/depois):
       "titulo": "Preços",
       "descricao": "Por que isso foi violado",
       "citacao": "Mensagem exata da IA que evidencia",
-      "severidade": "media"
+      "execution_id": "EX-260519-1226-289",
+      "severidade": "alta"
     }
   ],
   "pontos_positivos": ["Item 1", "Item 2"]
-}`
+}
+
+REGRAS DO CAMPO execution_id:
+- DEVE ser o ID que aparece entre parênteses do turno onde a violação ocorreu (ex: "EX-260519-1226-289").
+- Se a violação envolver vários turnos (contradição), coloque o ID do turno MAIS GRAVE (geralmente o que tem a citacao escolhida).
+- Se o turno em questão não tinha ID registrado, deixe execution_id null.`
 
 function buildUserPrompt(regrasText, conversaFormatada) {
   return `REGRAS QUE A IA TINHA QUE SEGUIR:
@@ -368,6 +535,16 @@ export async function evaluateLead(env, {
     return { ok: true, action: 'skipped', motivo: 'sem_conversa' }
   }
 
+  // 1.5 — Busca execuções da IA e cruza com bot_message do chat_messages.
+  //       Adiciona executionId + toolsUsed em cada turno da IA quando há match.
+  let executions = []
+  try {
+    executions = await fetchAgentExecutions(env, { leadId, limit: Number(env.IA_FEEDBACK_CONVERSA_LIMIT || 200) })
+  } catch (err) {
+    console.warn(`[iaFeedbackJob] Falha ao buscar execuções para lead=${leadId}: ${err.message}`)
+  }
+  messages = matchMessagesWithExecutions(messages, executions)
+
   // 3. Conta turnos da IA (linhas com bot_message não vazio)
   const turnosIa = messages.filter(
     (m) => m.bot_message && String(m.bot_message).trim().length > 0,
@@ -452,7 +629,16 @@ export async function evaluateLead(env, {
       notaGeral: Number(aiResult.nota_geral),
       veredito: veredictoNormalizado,
       resumoAvaliacao: String(aiResult.resumo_avaliacao || ''),
-      violacoes: Array.isArray(aiResult.violacoes) ? aiResult.violacoes : [],
+      violacoes: Array.isArray(aiResult.violacoes)
+        ? aiResult.violacoes.map((v) => ({
+            regra: String(v.regra || ''),
+            titulo: String(v.titulo || ''),
+            descricao: String(v.descricao || ''),
+            citacao: String(v.citacao || ''),
+            execution_id: v.execution_id ? String(v.execution_id) : null,
+            severidade: String(v.severidade || 'media').toLowerCase(),
+          }))
+        : [],
       pontosPositivos: Array.isArray(aiResult.pontos_positivos) ? aiResult.pontos_positivos : [],
       modeloAvaliador,
       jobExecutionId,

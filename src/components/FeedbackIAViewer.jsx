@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   AlertTriangle, CheckCircle, Clock, MessageSquare,
-  Bot, ListChecks, Search, Loader, RotateCcw,
+  Bot, ListChecks, Search, Loader, RotateCcw, Copy,
 } from 'lucide-react'
 import {
   loadAvaliacoes,
@@ -186,6 +186,43 @@ function AvaliacaoDetail({ id, onClose }) {
                       borderLeft: '2px solid var(--line-2)',
                     }}>
                       "{v.citacao}"
+                    </div>
+                  )}
+                  {v.execution_id && (
+                    <div style={{
+                      marginTop: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 11,
+                      color: 'var(--fg-2, #888)',
+                      fontFamily: 'monospace',
+                    }}>
+                      <span>Execução:</span>
+                      <span style={{
+                        padding: '2px 6px',
+                        borderRadius: 3,
+                        background: 'var(--bg-2, #2a2a2a)',
+                        color: 'var(--fg-1, #ddd)',
+                      }}>
+                        {v.execution_id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(v.execution_id)}
+                        title="Copiar ID"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--fg-2, #888)',
+                          cursor: 'pointer',
+                          padding: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Copy size={12} />
+                      </button>
                     </div>
                   )}
                 </div>
