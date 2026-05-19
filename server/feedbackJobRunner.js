@@ -9,7 +9,7 @@
 //    (insert único; outras instâncias ignoram).
 //  - Guard contra execuções paralelas no mesmo processo + fila de 1 pendente.
 
-import { runFeedbackJob, getFeedbackJobPreview } from './feedbackJob.js'
+import { runFeedbackJob, getFeedbackJobPreview, reapStaleRunsExternal } from './feedbackJob.js'
 
 let jobRunning = false
 let pendingTrigger = false
@@ -18,6 +18,7 @@ let schedulerStarted = false
 let scheduledEnv = null
 let lastTriggeredHourKey = null
 let lastHeartbeatMinute = null
+let lastReaperTickMs = 0
 
 export async function runOnce(env, trigger = 'manual') {
   if (jobRunning) {
@@ -27,17 +28,43 @@ export async function runOnce(env, trigger = 'manual') {
   }
   jobRunning = true
   currentRunStartedAt = new Date()
+
+  // Watchdog: se o runFeedbackJob travar, libera o lock local depois de N min
+  // pra não bloquear o scheduler indefinidamente. NÃO mata o Promise (não tem como
+  // em JS sem worker), mas libera o lock pra próxima execução não ficar esperando.
+  const watchdogMin = Number(env.FEEDBACK_JOB_WATCHDOG_MINUTES || 30)
+  let watchdogFired = false
+  const watchdogTimer = setTimeout(() => {
+    watchdogFired = true
+    console.warn(
+      `[FeedbackJob] ⚠ WATCHDOG: job ${trigger} excedeu ${watchdogMin} min sem retornar. ` +
+      `Liberando lock local. O Promise continua rodando — quando terminar, vai ignorar. ` +
+      `Verifique logs do Easypanel pra ver onde travou.`,
+    )
+    jobRunning = false
+    currentRunStartedAt = null
+    if (pendingTrigger) {
+      pendingTrigger = false
+      setImmediate(() => runOnce(env, 'queued_after_watchdog'))
+    }
+  }, watchdogMin * 60 * 1000)
+
   try {
     await runFeedbackJob(env, trigger)
   } catch (e) {
     console.error('[FeedbackJob] Execução falhou:', e.message)
   } finally {
-    jobRunning = false
-    currentRunStartedAt = null
-    if (pendingTrigger) {
-      pendingTrigger = false
-      console.log('[FeedbackJob] Disparando execução enfileirada agora.')
-      setImmediate(() => runOnce(env, 'queued'))
+    clearTimeout(watchdogTimer)
+    if (!watchdogFired) {
+      jobRunning = false
+      currentRunStartedAt = null
+      if (pendingTrigger) {
+        pendingTrigger = false
+        console.log('[FeedbackJob] Disparando execução enfileirada agora.')
+        setImmediate(() => runOnce(env, 'queued'))
+      }
+    } else {
+      console.log('[FeedbackJob] Job finalmente retornou após watchdog (descartando estado).')
     }
   }
 }
@@ -55,6 +82,17 @@ function tick() {
     lastHeartbeatMinute = minuteKey
     console.log(
       `[FeedbackJob] ♥ heartbeat ${now.toISOString()} | running=${jobRunning} pending=${pendingTrigger}`
+    )
+  }
+
+  // Reaper independente: roda no máximo 1× a cada 5 minutos pra marcar
+  // runs zumbis (crash entre INSERT e UPDATE final) sem esperar a próxima
+  // execução :01. Sem isso a UI fica "Executando..." até 1h.
+  const reapIntervalMs = 5 * 60 * 1000
+  if (Date.now() - lastReaperTickMs >= reapIntervalMs) {
+    lastReaperTickMs = Date.now()
+    reapStaleRunsExternal(scheduledEnv).catch((e) =>
+      console.warn('[FeedbackJob] reaper externo falhou:', e.message),
     )
   }
 

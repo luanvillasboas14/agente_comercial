@@ -135,7 +135,7 @@ export async function reapStaleFeedbackRuns(env, maxAgeMinutes) {
   })
   const minAge = Number.isFinite(Number(maxAgeMinutes))
     ? Number(maxAgeMinutes)
-    : Number(env.FEEDBACK_JOB_REAP_AFTER_MINUTES || 90)
+    : Number(env.FEEDBACK_JOB_REAP_AFTER_MINUTES || 30)
   const count = await reapStaleRuns(sb, minAge)
   return { reaped: count, max_age_minutes: minAge }
 }
@@ -302,7 +302,7 @@ async function reclaimHourSlotIfPreviousFailed(sb, execId, startedAtIso, trigger
  * Roda na entrada de cada execução. Idempotente — se não houver runs
  * presos, retorna 0. Configurável via FEEDBACK_JOB_REAP_AFTER_MINUTES.
  */
-async function reapStaleRuns(sb, maxAgeMinutes = 90) {
+async function reapStaleRuns(sb, maxAgeMinutes = 30) {
   if (!Number.isFinite(maxAgeMinutes) || maxAgeMinutes <= 0) return 0
   const cutoffIso = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString()
   try {
@@ -333,6 +333,20 @@ async function reapStaleRuns(sb, maxAgeMinutes = 90) {
     console.warn('[FeedbackJob] reaper falhou:', e.message)
     return 0
   }
+}
+
+/**
+ * Roda o reaper de runs zumbis fora do contexto de uma execução.
+ * Usado pelo scheduler tick (a cada 5 min). Cria próprio cliente Supabase.
+ */
+export async function reapStaleRunsExternal(env) {
+  const url = (env?.SUPABASE_URL_FEEDBACK || '').replace(/\/$/, '')
+  const key = env?.SUPABASE_KEY_FEEDBACK || ''
+  if (!url || !key) return 0
+  const supabaseTimeoutMs = Number(env.FEEDBACK_JOB_SUPABASE_TIMEOUT_MS || 60_000)
+  const sb = makeSupabaseClient(url, key, { timeoutMs: supabaseTimeoutMs })
+  const reapAfterMin = Number(env.FEEDBACK_JOB_REAP_AFTER_MINUTES || 30)
+  return await reapStaleRuns(sb, reapAfterMin)
 }
 
 // Janela em “sliding” de FEEDBACK_JOB_WINDOW_MINUTES (default 90) até agora.
@@ -1371,7 +1385,7 @@ export async function runFeedbackJob(env, trigger = 'cron') {
   // 'running' há muito tempo (provavelmente crash do processo anterior).
   // Sem isso a UI fica mostrando 'Executando...' pra sempre e o user
   // não sabe se rodou de verdade.
-  const reapAfterMin = Number(env.FEEDBACK_JOB_REAP_AFTER_MINUTES || 90)
+  const reapAfterMin = Number(env.FEEDBACK_JOB_REAP_AFTER_MINUTES || 30)
   const reapedCount = await reapStaleRuns(sb, reapAfterMin)
   if (reapedCount > 0) {
     addStep('reaper', { count: reapedCount, max_age_minutes: reapAfterMin })
