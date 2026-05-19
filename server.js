@@ -22,7 +22,7 @@ import { downloadUrlAsBase64 } from './server/mediaDownloader.js'
 import { recordWebhookIngress, getWebhookDiagnosticsSnapshot } from './server/evolution/webhookDiagnostics.js'
 import { forwardEvolutionWebhook, getForwarderSnapshot } from './server/evolution/webhookForwarder.js'
 import { getKommoPollSnapshot } from './server/kommoInboundDiagnostics.js'
-import { getModelRegistrySnapshot } from './server/ai/modelRegistry.js'
+import { getModelRegistrySnapshot, resolveModel } from './server/ai/modelRegistry.js'
 import {
   listLeadNotes,
   listLeadEvents,
@@ -48,6 +48,11 @@ import { reindexPos } from './server/salesbot/reindexPos.js'
 import { reindexPerguntas } from './server/ai/reindexPerguntas.js'
 import { startIaFeedbackRunner, getIaFeedbackRunnerStatus } from './server/iaFeedbackRunner.js'
 import { evaluateLead } from './server/iaFeedbackJob.js'
+import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionById, createVersionAndActivate, rollbackToVersion } from './server/iaFeedback/promptVersionStore.js'
+import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected } from './server/iaFeedback/proposalsStore.js'
+import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
+import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
+import { refreshAgentRulesText } from './server/ai/promptsLoader.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -1919,6 +1924,174 @@ app.post('/api/ia-feedback/avaliar-manual', async (req, res) => {
   }
 })
 
+// ── Otimizador de Prompt ──
+
+app.get('/api/ia-feedback/violations-ranking', async (req, res) => {
+  try {
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) {
+      return res.status(404).json({ error: 'Nenhuma versão ativa de prompt encontrada. Verifique se o seed foi executado.' })
+    }
+    const result = await getViolationsRanking(process.env, { activeVersion, limit: 100 })
+    res.json(result)
+  } catch (e) {
+    console.error('[ia-feedback/violations-ranking]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/analyze-rule', async (req, res) => {
+  try {
+    const { regra_alvo } = req.body || {}
+    if (!regra_alvo) return res.status(400).json({ error: 'regra_alvo é obrigatório (ex: "Regra 3")' })
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) {
+      return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+    }
+
+    const rankingData = await getViolationsRanking(process.env, { activeVersion, limit: 100 })
+    const regraNoRanking = rankingData.ranking.find((r) => r.regra === regra_alvo)
+    if (!regraNoRanking) {
+      return res.status(400).json({
+        error: `"${regra_alvo}" não possui violações na janela atual (desde v${activeVersion.versao}). Não há base para análise.`,
+      })
+    }
+
+    const proposalData = await analyzeRule(process.env, {
+      regraAlvo: regra_alvo,
+      ranking: rankingData,
+      activeVersion,
+    })
+
+    const proposal = await createProposal(process.env, {
+      baseada_em_versao_id: activeVersion.id,
+      modelo_analisador: resolveModel(process.env, 'prompt_optimizer'),
+      regra_alvo: proposalData.regra_alvo,
+      tipo_mudanca: proposalData.tipo_mudanca,
+      trecho_antes: proposalData.trecho_antes || '',
+      trecho_depois: proposalData.trecho_depois || '',
+      justificativa: proposalData.justificativa,
+      conflitos_potenciais: proposalData.conflitos_potenciais || null,
+      exemplos_violacoes: regraNoRanking.exemplos,
+      total_violacoes: regraNoRanking.count,
+      janela_de: rankingData.janela_de,
+      janela_ate: rankingData.janela_ate,
+    })
+
+    res.json(proposal)
+  } catch (e) {
+    console.error('[ia-feedback/analyze-rule]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/proposals', async (req, res) => {
+  try {
+    const { status, limit } = req.query
+    const proposals = await listProposals(process.env, {
+      status: status || undefined,
+      limit: limit ? Math.min(100, Math.max(1, Number(limit))) : 50,
+    })
+    res.json(proposals)
+  } catch (e) {
+    console.error('[ia-feedback/proposals]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/proposals/:id', async (req, res) => {
+  try {
+    const proposal = await getProposalById(process.env, req.params.id)
+    if (!proposal) return res.status(404).json({ error: 'Proposta não encontrada' })
+    res.json(proposal)
+  } catch (e) {
+    console.error('[ia-feedback/proposals/:id]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/proposals/:id/accept', async (req, res) => {
+  try {
+    const proposal = await getProposalById(process.env, req.params.id)
+    if (!proposal) return res.status(404).json({ error: 'Proposta não encontrada' })
+    if (proposal.status !== 'pendente') {
+      return res.status(400).json({ error: `Proposta já está com status "${proposal.status}" — não é possível aceitar novamente` })
+    }
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+
+    const activeText = activeVersion.agent_rules_text
+    const novoTexto = activeText.split(proposal.trecho_antes).join(proposal.trecho_depois)
+
+    if (novoTexto === activeText) {
+      return res.status(400).json({
+        error: 'trecho_antes não casa mais no prompt ativo — proposta desatualizada por uma versão posterior. Rejeite e rode análise nova.',
+      })
+    }
+
+    const newVersion = await createVersionAndActivate(process.env, {
+      agent_rules_text: novoTexto,
+      created_by: `analyzer:${proposal.id}`,
+      origem_proposta_id: proposal.id,
+      diff_resumo: `${proposal.regra_alvo} (${proposal.tipo_mudanca})`,
+    })
+
+    await markProposalApplied(process.env, proposal.id, newVersion.id)
+    await refreshAgentRulesText(process.env).catch(() => {})
+
+    res.json({ ok: true, new_version: { id: newVersion.id, versao: newVersion.versao } })
+  } catch (e) {
+    console.error('[ia-feedback/proposals/:id/accept]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/proposals/:id/reject', async (req, res) => {
+  try {
+    const proposal = await getProposalById(process.env, req.params.id)
+    if (!proposal) return res.status(404).json({ error: 'Proposta não encontrada' })
+    await markProposalRejected(process.env, proposal.id)
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[ia-feedback/proposals/:id/reject]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/prompt-versions', async (req, res) => {
+  try {
+    const versions = await listVersions(process.env, { limit: 50 })
+    res.json(versions)
+  } catch (e) {
+    console.error('[ia-feedback/prompt-versions]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/prompt-versions/:id', async (req, res) => {
+  try {
+    const version = await getVersionById(process.env, req.params.id)
+    if (!version) return res.status(404).json({ error: 'Versão não encontrada' })
+    res.json(version)
+  } catch (e) {
+    console.error('[ia-feedback/prompt-versions/:id]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/prompt-versions/:id/rollback', async (req, res) => {
+  try {
+    const newVersion = await rollbackToVersion(process.env, req.params.id)
+    await refreshAgentRulesText(process.env).catch(() => {})
+    res.json(newVersion)
+  } catch (e) {
+    console.error('[ia-feedback/prompt-versions/:id/rollback]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
 // ── Static files ──
 
 app.use(express.static(join(__dirname, 'dist')))
@@ -1972,6 +2145,15 @@ app.listen(PORT, async () => {
   }
 
   startIaFeedbackRunner(process.env)
+
+  // Otimizador de Prompt — seed da versão inicial e cache em memória
+  await seedInitialVersionIfEmpty(process.env).catch((err) =>
+    console.warn('[boot] seedInitialVersionIfEmpty falhou:', err.message),
+  )
+  await refreshAgentRulesText(process.env).catch((err) =>
+    console.warn('[boot] refreshAgentRulesText falhou:', err.message),
+  )
+  setInterval(() => refreshAgentRulesText(process.env).catch(() => {}), 60_000)
 
   // Probe do dispatcher no boot — falha silenciosa é a pior coisa em
   // produção. Se modo=dispatcher e ele não estiver acessível, a IA

@@ -42,6 +42,7 @@ const DEFAULTS = {
   salesbot_curso: 'gpt-4.1',             // melhor accuracy pra normalizar nome de curso (rara execução)
   feedback: 'gpt-4.1-mini',
   ia_feedback: 'gpt-4.1',               // auditor de qualidade da IA (mais preciso)
+  prompt_optimizer: 'o3-mini',           // analisador de violações e proposta de mudança de prompt
   vision: 'gpt-4.1-mini',
   transcribe: 'whisper-1',               // gpt-4o-transcribe é mais caro
   embeddings: 'text-embedding-3-small',  // 3-large é 6.5x mais caro
@@ -59,6 +60,7 @@ const ROLE_ENVS = {
   salesbot_curso: 'OPENAI_MODEL_SALESBOT_CURSO',
   feedback: 'OPENAI_MODEL_FEEDBACK',
   ia_feedback: 'OPENAI_MODEL_IA_FEEDBACK',
+  prompt_optimizer: 'OPENAI_MODEL_PROMPT_OPTIMIZER',
   vision: 'OPENAI_MODEL_VISION',
   transcribe: 'OPENAI_MODEL_TRANSCRIBE',
   embeddings: 'OPENAI_MODEL_EMBEDDINGS',

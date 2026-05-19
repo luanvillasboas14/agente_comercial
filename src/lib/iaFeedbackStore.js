@@ -71,3 +71,58 @@ export async function avaliarManual({ lead_id, telefone } = {}) {
     return { ok: false, error: e.message }
   }
 }
+
+// ─── Otimizador de Prompt ─────────────────────────────────────────────────────
+
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, opts)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    let parsed
+    try { parsed = JSON.parse(body) } catch { parsed = null }
+    const msg = parsed?.error || body || `HTTP ${res.status}`
+    throw new Error(msg)
+  }
+  return res.json()
+}
+
+export async function loadViolationsRanking() {
+  return apiFetch(`${BASE}/violations-ranking`)
+}
+
+export async function requestRuleAnalysis(regraAlvo) {
+  return apiFetch(`${BASE}/analyze-rule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regra_alvo: regraAlvo }),
+  })
+}
+
+export async function loadProposals(status) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiFetch(`${BASE}/proposals${qs}`)
+}
+
+export async function loadProposalById(id) {
+  return apiFetch(`${BASE}/proposals/${id}`)
+}
+
+export async function acceptProposal(id) {
+  return apiFetch(`${BASE}/proposals/${id}/accept`, { method: 'POST' })
+}
+
+export async function rejectProposal(id) {
+  return apiFetch(`${BASE}/proposals/${id}/reject`, { method: 'POST' })
+}
+
+export async function loadPromptVersions() {
+  return apiFetch(`${BASE}/prompt-versions`)
+}
+
+export async function loadPromptVersionById(id) {
+  return apiFetch(`${BASE}/prompt-versions/${id}`)
+}
+
+export async function rollbackPromptVersion(id) {
+  return apiFetch(`${BASE}/prompt-versions/${id}/rollback`, { method: 'POST' })
+}

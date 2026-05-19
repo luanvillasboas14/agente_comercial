@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   AlertTriangle, CheckCircle, Clock, MessageSquare,
-  Bot, ListChecks, Search, Loader, RotateCcw, Copy,
+  Bot, ListChecks, Search, Loader, RotateCcw, Copy, Wand2,
 } from 'lucide-react'
 import {
   loadAvaliacoes,
@@ -11,6 +11,7 @@ import {
   loadStatus,
   avaliarManual,
 } from '../lib/iaFeedbackStore'
+import PromptOptimizer from './PromptOptimizer'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -475,6 +476,12 @@ export default function FeedbackIAViewer() {
         <TabButton active={tab === 'runs'} onClick={() => setTab('runs')}>
           Execuções ({runs.length})
         </TabButton>
+        <TabButton active={tab === 'otimizar'} onClick={() => setTab('otimizar')}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Wand2 size={11} />
+            Otimizar Prompt
+          </span>
+        </TabButton>
       </div>
 
       {/* Tab: Avaliações */}
@@ -630,6 +637,9 @@ export default function FeedbackIAViewer() {
           </div>
         </div>
       )}
+
+      {/* Tab: Otimizar Prompt */}
+      {tab === 'otimizar' && <PromptOptimizer />}
 
       {/* Tab: Runs */}
       {tab === 'runs' && (

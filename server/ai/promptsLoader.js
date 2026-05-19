@@ -7,6 +7,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { getFeedbackSupabase } from '../iaFeedback/supabaseClient.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -117,9 +118,11 @@ export async function loadPrompts() {
   }
 }
 
-const AGENT_RULES_TEXT = `## INSTRUÇÕES DO AGENTE (PRIORIDADE MÁXIMA)
+const FALLBACK_AGENT_RULES_TEXT = `<!-- IMUTÁVEL -->
+## INSTRUÇÕES DO AGENTE (PRIORIDADE MÁXIMA)
 
 Você está conectado ao WhatsApp via Evolution API. Regras abaixo substituem qualquer instrução conflitante dos prompts acima:
+<!-- /IMUTÁVEL -->
 
 1. RESPONDA SEMPRE EM LINGUAGEM NATURAL, nunca em XML, JSON ou templates estruturados.
 
@@ -402,15 +405,80 @@ Você está conectado ao WhatsApp via Evolution API. Regras abaixo substituem qu
     - Marcador "[ESTAGIO: NAO — ...]" → "Esse curso não tem estágio supervisionado obrigatório, então você não precisa cumprir carga de estágio pra concluir."
     - SEM marcador → chama distribuir_humano + "Deixa eu pedir pra um consultor te confirmar isso do curso, ok?"`
 
+// ─── Cache de versão ativa ────────────────────────────────────────────────────
+
+let currentAgentRulesText = FALLBACK_AGENT_RULES_TEXT
+let currentVersionInfo = { id: null, versao: 0, activated_at: null, source: 'fallback' }
+let warnedNoActiveVersion = false
+
 /**
- * Retorna o bloco de instruções do agente (Rules 1–18).
- * Usado pelo avaliador de Feedback IA para auditar conversas.
+ * Retorna o texto das regras do agente a partir do cache em memória.
+ * Síncrono — use refreshAgentRulesText() no boot para popular o cache.
  */
 export function getAgentRulesText() {
-  return AGENT_RULES_TEXT
+  return currentAgentRulesText
+}
+
+/**
+ * Retorna informações da versão ativa em cache.
+ */
+export function getActiveVersionInfo() {
+  return { ...currentVersionInfo }
+}
+
+/**
+ * Retorna o texto hardcoded de fallback (sem consulta ao Supabase).
+ * Útil para o seed da primeira versão.
+ */
+export function getFallbackAgentRulesText() {
+  return FALLBACK_AGENT_RULES_TEXT
+}
+
+/**
+ * Busca a versão ativa no Supabase de Feedback e atualiza o cache em memória.
+ * Não lança exceção — se Supabase falhar, mantém o cache atual.
+ *
+ * @param {Record<string,string>} env  process.env ou compatível
+ */
+export async function refreshAgentRulesText(env) {
+  const sb = getFeedbackSupabase(env)
+  if (!sb) {
+    if (!warnedNoActiveVersion) {
+      warnedNoActiveVersion = true
+      console.warn('[promptsLoader/refresh] SUPABASE_URL_FEEDBACK não configurado — usando FALLBACK_AGENT_RULES_TEXT')
+    }
+    return
+  }
+
+  try {
+    const rows = await sb.select('ia_prompt_versions', 'ativa=eq.true&limit=1')
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null
+
+    if (!row) {
+      if (!warnedNoActiveVersion) {
+        warnedNoActiveVersion = true
+        console.warn('[promptsLoader/refresh] Nenhuma versão ativa em ia_prompt_versions — usando FALLBACK_AGENT_RULES_TEXT')
+      }
+      currentAgentRulesText = FALLBACK_AGENT_RULES_TEXT
+      currentVersionInfo = { id: null, versao: 0, activated_at: null, source: 'fallback' }
+      return
+    }
+
+    warnedNoActiveVersion = false
+    currentAgentRulesText = row.agent_rules_text
+    currentVersionInfo = {
+      id: row.id,
+      versao: row.versao,
+      activated_at: row.activated_at,
+      source: 'supabase',
+    }
+    console.log(`[promptsLoader/refresh] versão ativa: v${row.versao} id=${row.id}`)
+  } catch (err) {
+    console.warn(`[promptsLoader/refresh] Falha ao buscar versão ativa: ${err.message} — mantendo cache atual`)
+  }
 }
 
 export function buildSystemMessage(prompts) {
   const promptsText = prompts.map((p) => `### ${p.name} (${p.type})\n\n${p.body}`).join('\n\n---\n\n')
-  return promptsText + '\n\n---\n\n' + AGENT_RULES_TEXT
+  return promptsText + '\n\n---\n\n' + getAgentRulesText()
 }
