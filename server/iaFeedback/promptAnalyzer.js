@@ -89,7 +89,12 @@ REGRAS DA SUA PROPOSTA:
 3. Consolide quando possível: se a regra já está inchada (>200 palavras), considere remover redundâncias em vez de adicionar texto.
 4. Não invente exceções genéricas: cada exceção deve estar ancorada nas violações reais que você recebeu. Cite a evidência na justificativa.
 5. Detecte conflitos: se sua mudança puder entrar em conflito com outra regra do conjunto, sinalize em conflitos_potenciais.
-6. trecho_antes DEVE ser uma cópia LITERAL e EXATA de um trecho contínuo do prompt atual — não parafraseie, não resuma, não corte caracteres. O sistema vai aplicar string.replace(trecho_antes, trecho_depois) e falha se o trecho não casar exatamente.
+6. trecho_antes DEVE ser uma cópia LITERAL E EXATA de um trecho contínuo do prompt atual. Isso significa:
+   - Copie caractere por caractere, incluindo TODOS os espaços, indentação, quebras de linha, pontuação e caracteres especiais.
+   - NÃO reformate, NÃO consolide espaços em branco, NÃO troque quebras de linha por espaços, NÃO remova indentação.
+   - NÃO adicione "..." ou comentários no trecho.
+   - O sistema valida com agentRulesText.includes(trecho_antes) — se não casar caractere a caractere, a proposta é rejeitada.
+   - Em caso de dúvida, copie um trecho MENOR e mais cirúrgico (uma frase só) ao invés de um trecho maior que pode ter formatação sutil.
 7. Se as violações sugerirem que o avaliador está classificando incorretamente (e não que a regra está errada), retorne tipo_mudanca="nenhuma" e explique na justificativa.
 
 SAÍDA: JSON estrito, somente o objeto, sem markdown nem comentários:
@@ -131,6 +136,35 @@ ${exemploLines || '(nenhum exemplo disponível)'}
 Total: ${totalViolacoes} violações dessa regra na janela.
 
 Retorne sua proposta no formato JSON especificado.`
+}
+
+// ─── Match flexível de whitespace ────────────────────────────────────────────
+
+/**
+ * Tenta encontrar o `needle` no `haystack` com tolerância a diferenças de whitespace.
+ * Retorna { match: <trecho real do haystack>, exact: bool } ou null se não encontrar.
+ *
+ * Estratégias em ordem:
+ *  1. String.includes — match exato
+ *  2. Regex com \s+ substituindo qualquer whitespace do needle
+ */
+function findFlexibleMatch(haystack, needle) {
+  if (typeof haystack !== 'string' || typeof needle !== 'string' || !needle) return null
+  if (haystack.includes(needle)) return { match: needle, exact: true }
+
+  // Escapa regex chars do needle e substitui sequências de whitespace por \s+
+  const escaped = needle
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+')
+  let re
+  try {
+    re = new RegExp(escaped)
+  } catch {
+    return null
+  }
+  const m = haystack.match(re)
+  if (!m) return null
+  return { match: m[0], exact: false }
 }
 
 // ─── Função principal ─────────────────────────────────────────────────────────
@@ -239,13 +273,23 @@ export async function analyzeRule(env, { regraAlvo, ranking, activeVersion }) {
   }
 
   if (proposal.tipo_mudanca !== 'nenhuma') {
-    if (!proposal.trecho_antes || !agentRulesText.includes(proposal.trecho_antes)) {
+    if (!proposal.trecho_antes) {
+      throw new Error('[analyzer/validation] trecho_antes vazio na proposta')
+    }
+    const found = findFlexibleMatch(agentRulesText, proposal.trecho_antes)
+    if (!found) {
       console.error(
-        `[analyzer/validation] trecho_antes não encontrado no prompt ativo. Modelo retornou: "${String(proposal.trecho_antes || '').slice(0, 200)}"`,
+        `[analyzer/validation] trecho_antes não encontrado (nem com match flexível). Modelo retornou: "${String(proposal.trecho_antes).slice(0, 300)}"`,
       )
       throw new Error(
-        '[analyzer/validation] trecho_antes não encontrado literalmente no prompt ativo. O modelo deve copiar trecho exato.',
+        '[analyzer/validation] trecho_antes não encontrado no prompt ativo, nem mesmo com tolerância de whitespace. O modelo parafraseou — clique em Analisar de novo, ou rejeite e tente outra regra.',
       )
+    }
+    if (!found.exact) {
+      console.log(
+        `[analyzer/validation] trecho_antes ajustado via match flexível (whitespace normalizado). Modelo original: "${proposal.trecho_antes.slice(0, 80)}..." → trecho real: "${found.match.slice(0, 80)}..."`,
+      )
+      proposal.trecho_antes = found.match
     }
   }
 

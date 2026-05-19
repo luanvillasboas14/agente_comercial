@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Wand2, RefreshCw, ChevronDown, ChevronRight, AlertTriangle,
   CheckCircle, Clock, Copy, Loader, History, FileText, RotateCcw,
-  X, Zap,
+  X, Zap, GitCompare,
 } from 'lucide-react'
 import {
   loadViolationsRanking,
@@ -13,6 +13,7 @@ import {
   loadPromptVersions,
   loadPromptVersionById,
   rollbackPromptVersion,
+  syncPromptFromFallback,
 } from '../lib/iaFeedbackStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -815,6 +816,7 @@ export default function PromptOptimizer() {
   const [activeVersionInfo, setActiveVersionInfo] = useState(null)
   const [loadingVersion, setLoadingVersion] = useState(true)
   const [proposalRefreshKey, setProposalRefreshKey] = useState(0)
+  const [syncing, setSyncing] = useState(false)
 
   const loadVersion = useCallback(() => {
     setLoadingVersion(true)
@@ -829,6 +831,20 @@ export default function PromptOptimizer() {
 
   function handleAnalyzeComplete() {
     setProposalRefreshKey((k) => k + 1)
+  }
+
+  async function handleSyncFromFallback() {
+    if (!confirm('Criar nova versão ativa a partir do FALLBACK_AGENT_RULES_TEXT do código? Use isso quando o texto hardcoded foi atualizado e você quer aplicar em produção.')) return
+    setSyncing(true)
+    try {
+      const result = await syncPromptFromFallback()
+      loadVersion()
+      alert(`Versão v${result.new_version?.versao} criada e ativada.`)
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   return (
@@ -864,6 +880,21 @@ export default function PromptOptimizer() {
               : <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Nenhuma versão ativa. Execute o seed no Supabase.</span>
           }
         </div>
+        <button
+          onClick={handleSyncFromFallback}
+          disabled={syncing}
+          title="Criar nova versão ativa a partir do fallback hardcoded no código"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', borderRadius: 8, border: '1px solid oklch(72% 0.14 155 / 0.35)',
+            background: 'oklch(72% 0.14 155 / 0.10)', color: 'oklch(35% 0.14 155)',
+            fontSize: 12, fontWeight: 500, cursor: syncing ? 'default' : 'pointer',
+            opacity: syncing ? 0.6 : 1, whiteSpace: 'nowrap',
+          }}
+        >
+          {syncing ? <Loader size={13} className="spin" /> : <GitCompare size={13} />}
+          Sincronizar do código
+        </button>
       </div>
 
       {/* Seção 1: Ranking */}

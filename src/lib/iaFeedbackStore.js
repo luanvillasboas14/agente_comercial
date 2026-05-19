@@ -126,3 +126,13 @@ export async function loadPromptVersionById(id) {
 export async function rollbackPromptVersion(id) {
   return apiFetch(`${BASE}/prompt-versions/${id}/rollback`, { method: 'POST' })
 }
+
+export async function syncPromptFromFallback() {
+  const res = await fetch('/api/ia-feedback/prompt-versions/sync-from-fallback', { method: 'POST' })
+  const text = await res.text()
+  if (!res.ok) {
+    const detail = text ? JSON.parse(text).error || text : `HTTP ${res.status}`
+    throw new Error(detail)
+  }
+  return text ? JSON.parse(text) : {}
+}

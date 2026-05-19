@@ -52,7 +52,7 @@ import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionBy
 import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected } from './server/iaFeedback/proposalsStore.js'
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
-import { refreshAgentRulesText } from './server/ai/promptsLoader.js'
+import { refreshAgentRulesText, getFallbackAgentRulesText } from './server/ai/promptsLoader.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -2088,6 +2088,28 @@ app.post('/api/ia-feedback/prompt-versions/:id/rollback', async (req, res) => {
     res.json(newVersion)
   } catch (e) {
     console.error('[ia-feedback/prompt-versions/:id/rollback]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/prompt-versions/sync-from-fallback', async (req, res) => {
+  try {
+    const fallback = getFallbackAgentRulesText()
+    const activeVersion = await getActiveVersion(process.env)
+    if (activeVersion && activeVersion.agent_rules_text === fallback) {
+      return res.status(400).json({
+        error: `A versão ativa (v${activeVersion.versao}) já é idêntica ao fallback hardcoded — nenhuma sincronização necessária.`,
+      })
+    }
+    const newVersion = await createVersionAndActivate(process.env, {
+      agent_rules_text: fallback,
+      created_by: 'manual_sync_from_fallback',
+      diff_resumo: 'Sincronizado com FALLBACK_AGENT_RULES_TEXT hardcoded',
+    })
+    await refreshAgentRulesText(process.env).catch(() => {})
+    res.json({ ok: true, new_version: { id: newVersion.id, versao: newVersion.versao } })
+  } catch (e) {
+    console.error('[ia-feedback/prompt-versions/sync-from-fallback]', e.message)
     res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
   }
 })

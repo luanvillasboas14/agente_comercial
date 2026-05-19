@@ -615,6 +615,32 @@ export async function evaluateLead(env, {
     return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
+  // 7d. Enforça veredito mínimo baseado nas violações detectadas.
+  // O LLM às vezes é generoso e dá "aprovado" mesmo com violações.
+  // Política: qualquer violação rebaixa pra "parcial" no mínimo; violação alta rebaixa pra "reprovado".
+  const violacoesNorm = Array.isArray(aiResult.violacoes) ? aiResult.violacoes : []
+  const temViolacao = violacoesNorm.length > 0
+  const temViolacaoAlta = violacoesNorm.some(
+    (v) => String(v?.severidade || '').toLowerCase() === 'alta',
+  )
+
+  let veredictoFinal = veredictoNormalizado
+  let notaFinal = Number(aiResult.nota_geral)
+
+  if (temViolacaoAlta && veredictoFinal !== 'reprovado') {
+    console.log(
+      `[iaFeedbackJob] lead=${leadId} rebaixando veredito de "${veredictoFinal}" → "reprovado" (violação alta presente)`,
+    )
+    veredictoFinal = 'reprovado'
+    if (notaFinal > 5.0) notaFinal = 5.0
+  } else if (temViolacao && veredictoFinal === 'aprovado') {
+    console.log(
+      `[iaFeedbackJob] lead=${leadId} rebaixando veredito de "aprovado" → "parcial" (${violacoesNorm.length} violação(ões) presente(s))`,
+    )
+    veredictoFinal = 'parcial'
+    if (notaFinal > 8.0) notaFinal = 8.0
+  }
+
   // 8. Grava em ia_feedback
   try {
     await saveAvaliacao(sbFeedback, {
@@ -626,8 +652,8 @@ export async function evaluateLead(env, {
       conversaCompleta: messages,
       totalMensagens: messages.length,
       totalTurnosIa: turnosIa,
-      notaGeral: Number(aiResult.nota_geral),
-      veredito: veredictoNormalizado,
+      notaGeral: notaFinal,
+      veredito: veredictoFinal,
       resumoAvaliacao: String(aiResult.resumo_avaliacao || ''),
       violacoes: Array.isArray(aiResult.violacoes)
         ? aiResult.violacoes.map((v) => ({
@@ -652,13 +678,13 @@ export async function evaluateLead(env, {
     return { ok: false, action: 'erro', motivo: 'erro_modelo' }
   }
 
-  console.log(`[iaFeedbackJob] ✓ lead=${leadId} nota=${aiResult.nota_geral} veredito=${aiResult.veredito}`)
+  console.log(`[iaFeedbackJob] ✓ lead=${leadId} nota=${notaFinal} veredito=${veredictoFinal} (raw nota=${aiResult.nota_geral} raw veredito=${veredictoNormalizado})`)
 
   return {
     ok: true,
     action: 'avaliado',
-    nota: Number(aiResult.nota_geral),
-    veredito: String(aiResult.veredito),
+    nota: notaFinal,
+    veredito: veredictoFinal,
     turnosIa,
     totalMensagens: messages.length,
   }
