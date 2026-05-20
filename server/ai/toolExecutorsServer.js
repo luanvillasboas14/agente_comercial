@@ -264,6 +264,19 @@ async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10)
   const data = await res.json()
   if (!Array.isArray(data) || data.length === 0) return 'Nenhum resultado encontrado na base.'
 
+  if (toolName === 'buscar_precos') {
+    let nGrad = 0, nPos = 0, nOutro = 0
+    for (const d of data) {
+      const meta = extractPriceMeta(d?.metadata)
+      if (!meta?.tipo) { nOutro++; continue }
+      if (isPosTipo(meta.tipo)) nPos++; else nGrad++
+    }
+    console.log(
+      `[tool/buscar_precos/breakdown] query="${String(finalQuery).slice(0, 80)}" ` +
+      `total=${data.length} graduacao=${nGrad} pos=${nPos} sem_nivel=${nOutro}`,
+    )
+  }
+
   // Anexa metadata legível ao texto pra o LLM — sem isso ele perdia
   // contexto crítico (link da grade, nível/modalidade do preço) e
   // alucinava (oferecia link inexistente, juntava preço de graduação
@@ -460,7 +473,7 @@ export function buildToolExecutors(env, ctx) {
   const safeCtx = ctx || createNoopExecutionContext()
   return {
     buscar_precos: async ({ query }) =>
-      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 8),
+      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 16),
     buscar_informacoes: async ({ query }) =>
       vectorSearch(env, safeCtx, 'buscar_informacoes', 'match_documents', query, 15),
     buscar_pos: async ({ query }) =>

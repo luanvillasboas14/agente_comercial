@@ -269,7 +269,8 @@ Você está conectado ao WhatsApp via Evolution API. Regras abaixo substituem qu
     d) APÓS o filtro, conte o que sobrou:
        - Se sobrou 1 preço → cite esse valor único, simples e direto. NÃO crie range. NÃO mencione "outros valores".
        - Se sobraram 2+ preços do MESMO curso/MESMO nível em modalidades distintas que AMBAS existem pra esse curso → cite cada modalidade com seu valor ("EAD: R$ X / Semipresencial: R$ Y"). Sem range.
-       - Se sobrou 0 → NÃO chute o "mais parecido". Diga que vai confirmar o valor exato com um consultor e chame distribuir_humano.
+       - Se sobrou 0 (nenhum resultado bate com o curso/nível do contexto) → ANTES de transferir, REFAÇA a busca uma vez com a query mais específica incluindo o nível. Ex.: se contexto é GRADUAÇÃO em Marketing e os resultados vieram só de pós, refaça buscar_precos com query "graduacao marketing valor mensalidade" (ou similar — inclua a palavra "graduacao" no texto da query). Depois aplique de novo os filtros (a)-(c). Se AINDA assim sobrou 0, aí sim NÃO chute o "mais parecido": diga que vai confirmar o valor exato com um consultor e chame distribuir_humano.
+       - A refazer-busca só vale UMA VEZ. Não entre em loop chamando buscar_precos várias vezes.
 
     e) NÃO LISTE preços brutos pro cliente como "encontrei valores R$ 200, R$ 192, R$ 162...". Esse tipo de resposta indica que você pulou o filtro. Se você se viu prestes a escrever isso, PARE e refaça aplicando (a)-(d).
 

@@ -287,9 +287,41 @@ function AvaliacaoDetail({ id, onClose }) {
                     background: 'var(--accent-soft)', border: '1px solid var(--accent-line)',
                     color: 'var(--fg-1)', marginLeft: 'auto', maxWidth: '80%',
                   }}>
-                    <span style={{ fontSize: 10, color: 'var(--accent-fg)', display: 'block', marginBottom: 2 }}>
-                      IA · {formatTime(msg.created_at)}
-                    </span>
+                    <div style={{ fontSize: 10, color: 'var(--accent-fg)', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span>IA · {formatTime(msg.created_at)}</span>
+                      {msg.executionId && (
+                        <>
+                          <span style={{
+                            fontFamily: 'monospace', fontSize: 9,
+                            padding: '1px 5px', borderRadius: 3,
+                            background: 'var(--bg-1)', color: 'var(--fg-2)',
+                            border: '1px solid var(--line-1)',
+                          }}>
+                            {msg.executionId}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard?.writeText(msg.executionId)}
+                            title="Copiar execution_id"
+                            style={{
+                              background: 'transparent', border: 'none', cursor: 'pointer',
+                              color: 'var(--fg-3)', padding: 0, display: 'flex', alignItems: 'center',
+                            }}
+                          >
+                            <Copy size={10} />
+                          </button>
+                        </>
+                      )}
+                      {Array.isArray(msg.toolsUsed) && msg.toolsUsed.length > 0 && (
+                        <span style={{
+                          fontSize: 9, color: 'var(--fg-3)',
+                          padding: '1px 5px', borderRadius: 3,
+                          background: 'var(--bg-1)', border: '1px solid var(--line-1)',
+                        }}>
+                          [tools: {msg.toolsUsed.join(', ')}]
+                        </span>
+                      )}
+                    </div>
                     {msg.bot_message}
                   </div>
                 )}
