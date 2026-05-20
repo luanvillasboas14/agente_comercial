@@ -274,9 +274,11 @@ async function insertEventsBatch(db, events, syncRunId) {
     const chunk = rows.slice(i, i + CHUNK)
     // return=representation com ignore-duplicates: o response contém só as linhas
     // realmente inseridas (duplicados são silenciosamente ignorados).
-    const inserted = await db.insert('kommo_consultor_eventos', chunk, {
-      Prefer: 'resolution=ignore-duplicates,return=representation',
-    })
+    const inserted = await db.insert(
+      'kommo_consultor_eventos?on_conflict=kommo_event_id',
+      chunk,
+      { Prefer: 'resolution=ignore-duplicates,return=representation' },
+    )
     const count = Array.isArray(inserted) ? inserted.length : 0
     totalInserted += count
   }
