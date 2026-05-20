@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { RefreshCw, Play } from 'lucide-react'
+import { RefreshCw, Play, FlaskConical, X } from 'lucide-react'
 import { usePollingWhenVisible } from '../lib/usePollingWhenVisible'
 
 const STATUS_COLORS = {
@@ -29,6 +29,8 @@ export default function KommoEventsRuns() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [running, setRunning] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
 
   const fetchRuns = useCallback(async () => {
     setLoading(true)
@@ -59,6 +61,24 @@ export default function KommoEventsRuns() {
     }
   }, [fetchRuns])
 
+  const runTest = useCallback(async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const r = await fetch('/api/kommo-events/test-fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      const data = await r.json()
+      setTestResult({ httpStatus: r.status, ...data })
+    } catch (e) {
+      setTestResult({ ok: false, error: e.message })
+    } finally {
+      setTesting(false)
+    }
+  }, [])
+
   usePollingWhenVisible(fetchRuns, 60_000, true)
 
   return (
@@ -72,11 +92,85 @@ export default function KommoEventsRuns() {
           <button className="btn btn-secondary" onClick={fetchRuns} disabled={loading}>
             <RefreshCw size={14} /> Atualizar
           </button>
+          <button className="btn btn-secondary" onClick={runTest} disabled={testing}>
+            <FlaskConical size={14} /> {testing ? 'Testando...' : 'Testar (1 página)'}
+          </button>
           <button className="btn btn-primary" onClick={triggerRun} disabled={running}>
             <Play size={14} /> Executar agora (ontem)
           </button>
         </div>
       </div>
+
+      {testResult && (
+        <div className="card" style={{ marginBottom: 12, borderLeft: `3px solid ${testResult.ok ? 'var(--success)' : 'var(--danger)'}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>
+                Resultado do teste {testResult.ok ? '✓' : '✗'}
+              </div>
+              {testResult.reference_date && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  referência: {testResult.reference_date}
+                </div>
+              )}
+            </div>
+            <button
+              className="btn-icon"
+              onClick={() => setTestResult(null)}
+              style={{ width: 28, height: 28 }}
+              title="Fechar"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {testResult.error && (
+            <div style={{ color: 'var(--danger)', marginBottom: 8 }}>Erro: {testResult.error}</div>
+          )}
+
+          {testResult.kommo && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12, marginBottom: 10 }}>
+              <Metric label="Status HTTP Kommo" value={testResult.kommo.status ?? '—'} />
+              <Metric label="Eventos retornados" value={testResult.kommo.total_events ?? 0} />
+              <Metric label="Tempo (ms)" value={testResult.kommo.elapsed_ms ?? '—'} />
+              <Metric label="Consultores no grupo" value={testResult.group?.size ?? 0} />
+            </div>
+          )}
+
+          {testResult.kommo?.error && (
+            <div style={{ padding: 10, background: 'rgba(255,80,80,0.1)', borderRadius: 8, color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>
+              Erro Kommo: {testResult.kommo.error}
+            </div>
+          )}
+
+          {testResult.group?.consultores && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--muted)' }}>
+                Ver consultores testados ({testResult.group.consultores.length})
+              </summary>
+              <div style={{ marginTop: 6, fontSize: 12, fontFamily: 'monospace' }}>
+                {testResult.group.consultores.map((c) => (
+                  <div key={c.id}>{c.id} — {c.nome}</div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          {testResult.kommo?.events_sample?.length > 0 && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--muted)' }}>
+                Ver amostra de eventos (até 5)
+              </summary>
+              <pre style={{
+                marginTop: 6, padding: 10, background: 'var(--bg)', borderRadius: 8,
+                fontSize: 11, maxHeight: 300, overflow: 'auto',
+              }}>
+{JSON.stringify(testResult.kommo.events_sample, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
 
       {error && <div className="state-msg" style={{ color: 'var(--danger)' }}>Erro: {error}</div>}
 

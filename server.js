@@ -239,6 +239,78 @@ app.get('/api/kommo-events/metrics', async (req, res) => {
   }
 })
 
+app.post('/api/kommo-events/test-fetch', async (req, res) => {
+  try {
+    const refDate = String(req.body?.reference_date || '').trim()
+    const useDate = /^\d{4}-\d{2}-\d{2}$/.test(refDate) ? refDate : null
+
+    const { listEventsByConsultoresAndDate } = await import('./server/kommoClient.js')
+    const { getConsultoresAtivos } = await import('./server/kommoEvents/consultoresSource.js')
+
+    let referenceDate
+    let fromUnix
+    let toUnix
+    if (useDate) {
+      referenceDate = useDate
+      const fromUtc = new Date(`${useDate}T03:00:00Z`)
+      const toUtc = new Date(fromUtc.getTime() + 24 * 60 * 60 * 1000 - 1000)
+      fromUnix = Math.floor(fromUtc.getTime() / 1000)
+      toUnix = Math.floor(toUtc.getTime() / 1000)
+    } else {
+      const SP_OFFSET = -180 * 60 * 1000
+      const spNow = Date.now() + SP_OFFSET
+      const spYesterday = new Date(spNow - 24 * 60 * 60 * 1000)
+      const yyyy = spYesterday.getUTCFullYear()
+      const mm = String(spYesterday.getUTCMonth() + 1).padStart(2, '0')
+      const dd = String(spYesterday.getUTCDate()).padStart(2, '0')
+      referenceDate = `${yyyy}-${mm}-${dd}`
+      const fromUtc = new Date(`${referenceDate}T03:00:00Z`)
+      const toUtc = new Date(fromUtc.getTime() + 24 * 60 * 60 * 1000 - 1000)
+      fromUnix = Math.floor(fromUtc.getTime() / 1000)
+      toUnix = Math.floor(toUtc.getTime() / 1000)
+    }
+
+    const consultores = await getConsultoresAtivos(process.env)
+    if (consultores.length === 0) {
+      return res.status(400).json({ ok: false, error: 'view consultores vazia' })
+    }
+    const groupSize = Math.max(1, Math.min(50, Number(process.env.KOMMO_EVENTS_GROUP_SIZE || 10)))
+    const firstGroup = consultores.slice(0, groupSize)
+    const ids = firstGroup.map((c) => c.kommoUserId)
+
+    const t0 = Date.now()
+    const result = await listEventsByConsultoresAndDate(process.env, {
+      createdByIds: ids,
+      fromUnix,
+      toUnix,
+      page: 1,
+      limit: 25,
+    })
+    const elapsedMs = Date.now() - t0
+
+    res.json({
+      ok: result.ok,
+      reference_date: referenceDate,
+      window: { fromUnix, toUnix, from_iso: new Date(fromUnix * 1000).toISOString(), to_iso: new Date(toUnix * 1000).toISOString() },
+      group: {
+        size: firstGroup.length,
+        consultores: firstGroup.map((c) => ({ id: c.kommoUserId, nome: c.nome })),
+      },
+      kommo: {
+        status: result.status || null,
+        error: result.error || null,
+        retry_after_ms: result.retryAfterMs || null,
+        elapsed_ms: elapsedMs,
+        total_events: Array.isArray(result.events) ? result.events.length : 0,
+        events_sample: Array.isArray(result.events) ? result.events.slice(0, 5) : [],
+      },
+    })
+  } catch (e) {
+    console.error('[kommo-events/test-fetch]', e.message)
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // ── Feedback Job: scheduler + endpoint de status ──
 
 startScheduler(process.env)
