@@ -186,6 +186,59 @@ app.post('/api/kommo-events/run-now', async (req, res) => {
   }
 })
 
+app.get('/api/kommo-events/metrics', async (req, res) => {
+  try {
+    const date = String(req.query.date || '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'parametro date obrigatorio no formato YYYY-MM-DD' })
+    }
+
+    const url = (process.env.SUPABASE_URL || '').replace(/\/$/, '')
+    const key = process.env.SUPABASE_KEY || ''
+    if (!url || !key) return res.status(500).json({ error: 'SUPABASE_URL/SUPABASE_KEY ausentes' })
+
+    const rpcRes = await fetch(`${url}/rest/v1/rpc/consultor_metricas_diarias`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_data: date }),
+    })
+    const rpcText = await rpcRes.text()
+    if (!rpcRes.ok) {
+      return res.status(rpcRes.status).json({ error: `RPC falhou: ${rpcText.slice(0, 300)}` })
+    }
+    const metrics = rpcText ? JSON.parse(rpcText) : []
+
+    let consultoresMap = new Map()
+    try {
+      const { getFeedbackSupabase } = await import('./server/iaFeedback/supabaseClient.js')
+      const sb = getFeedbackSupabase(process.env)
+      if (sb) {
+        const rows = await sb.select('consultores', 'select=nome,id_lead')
+        for (const r of (Array.isArray(rows) ? rows : [])) {
+          const id = Number(r?.id_lead)
+          if (Number.isFinite(id) && id > 0) consultoresMap.set(id, String(r?.nome || '').trim())
+        }
+      }
+    } catch (e) {
+      console.warn('[kommo-events/metrics] falha ao buscar nomes:', e.message)
+    }
+
+    const enriched = (Array.isArray(metrics) ? metrics : []).map((m) => ({
+      ...m,
+      consultor_nome: consultoresMap.get(Number(m.consultor_id)) || null,
+    }))
+
+    res.json({ date, rows: enriched })
+  } catch (e) {
+    console.error('[kommo-events/metrics]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ── Feedback Job: scheduler + endpoint de status ──
 
 startScheduler(process.env)

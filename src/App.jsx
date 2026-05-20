@@ -8,6 +8,8 @@ import FeedbackJobViewer from './components/FeedbackJobViewer'
 import FeedbackDashboard from './components/FeedbackDashboard'
 import SalesbotExecutions from './components/SalesbotExecutions'
 import FeedbackIAViewer from './components/FeedbackIAViewer'
+import KommoEventsRuns from './components/KommoEventsRuns'
+import KommoEventsMetrics from './components/KommoEventsMetrics'
 import './App.css'
 
 const STORAGE_KEY = 'prompt_edits'
@@ -172,6 +174,8 @@ export default function App() {
           {!loading && !error && page === 'feedback' && <FeedbackJobViewer />}
           {!loading && !error && page === 'feedback-dashboard' && <FeedbackDashboard />}
           {!loading && !error && page === 'feedback-ia' && <FeedbackIAViewer />}
+          {!loading && !error && page === 'kommo-runs' && <KommoEventsRuns />}
+          {!loading && !error && page === 'kommo-atividade' && <KommoEventsMetrics />}
         </div>
       </main>
     </div>
