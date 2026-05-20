@@ -398,6 +398,64 @@ export async function getTalkById(env, talkId) {
 }
 
 /**
+ * GET /api/v4/events global, filtrando por janela de tempo + array de created_by.
+ * Faz fetch direto (sem kommoFetch) para capturar o header Retry-After em 429s.
+ *
+ * @param {Record<string,string>} env
+ * @param {{ createdByIds: number[], fromUnix: number, toUnix: number, page?: number, limit?: number }} opts
+ * @returns {Promise<{ ok: boolean, events: any[], status?: number, error?: string, retryAfterMs?: number }>}
+ */
+export async function listEventsByConsultoresAndDate(env, opts) {
+  const ids = (opts.createdByIds || []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
+  if (ids.length === 0) return { ok: false, error: 'createdByIds vazio', events: [] }
+  const fromUnix = Math.floor(Number(opts.fromUnix) || 0)
+  const toUnix = Math.floor(Number(opts.toUnix) || 0)
+  if (fromUnix <= 0 || toUnix <= 0 || toUnix <= fromUnix) {
+    return { ok: false, error: 'janela invalida', events: [] }
+  }
+  const page = Math.max(1, Number(opts.page) || 1)
+  const limit = Math.min(250, Math.max(1, Number(opts.limit) || 250))
+
+  const params = [
+    `filter[created_at][from]=${fromUnix}`,
+    `filter[created_at][to]=${toUnix}`,
+    ...ids.map((id, i) => `filter[created_by][${i}]=${id}`),
+    `limit=${limit}`,
+    `page=${page}`,
+  ]
+  const path = `/api/v4/events?${params.join('&')}`
+
+  const base = (env.KOMMO_BASE_URL || '').replace(/\/$/, '')
+  const token = env.KOMMO_ACCESS_TOKEN || ''
+  if (!base || !token) return { ok: false, error: 'KOMMO_BASE_URL/KOMMO_ACCESS_TOKEN ausentes', events: [] }
+
+  try {
+    const res = await fetch(`${base}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (res.status === 204) return { ok: true, events: [], status: 204 }
+    if (res.status === 429) {
+      const ra = Number(res.headers.get('retry-after'))
+      const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : null
+      return { ok: false, status: 429, retryAfterMs, error: 'rate limited', events: [] }
+    }
+    const raw = await res.text()
+    let data = null
+    try { data = raw ? JSON.parse(raw) : null } catch { data = null }
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: (raw || '').slice(0, 400), events: [] }
+    }
+    const events = data?._embedded?.events || []
+    return { ok: true, events, status: res.status }
+  } catch (e) {
+    return { ok: false, error: e.message, events: [] }
+  }
+}
+
+/**
  * Lista eventos do log do Kommo associados a um lead.
  *
  * Útil para capturar mensagens recebidas (`incoming_chat_message`) sem depender

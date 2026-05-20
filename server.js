@@ -47,6 +47,8 @@ import { saveSalesbotExecution } from './server/salesbot/telemetry.js'
 import { reindexPos } from './server/salesbot/reindexPos.js'
 import { reindexPerguntas } from './server/ai/reindexPerguntas.js'
 import { startIaFeedbackRunner, getIaFeedbackRunnerStatus } from './server/iaFeedbackRunner.js'
+import { startKommoEventsScheduler } from './server/kommoEvents/kommoEventsRunner.js'
+import { runKommoEventsJob, getRecentRuns as getKommoEventsRecentRuns } from './server/kommoEvents/kommoEventsJob.js'
 import { evaluateLead } from './server/iaFeedbackJob.js'
 import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionById, createVersionAndActivate, rollbackToVersion } from './server/iaFeedback/promptVersionStore.js'
 import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected, isProposalObsolete } from './server/iaFeedback/proposalsStore.js'
@@ -155,6 +157,30 @@ app.all('/api/feedback-supabase/*path', async (req, res) => {
     })
     const body = await response.text()
     res.status(response.status).set('Content-Type', 'application/json').send(body)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ── Kommo Events: endpoints de status e disparo manual ──
+
+app.get('/api/kommo-events/status', async (_req, res) => {
+  try {
+    const runs = await getKommoEventsRecentRuns(process.env, 5)
+    res.json({ runs })
+  } catch (e) {
+    console.error('[kommo-events/status]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/kommo-events/run-now', async (req, res) => {
+  try {
+    const refDate = req.body?.reference_date || null
+    // Fire-and-forget pra não bloquear a UI
+    runKommoEventsJob(process.env, { referenceDate: refDate, trigger: 'manual' })
+      .catch((e) => console.error('[kommo-events/run-now] FAIL:', e.message))
+    res.json({ ok: true, started: true, reference_date: refDate || 'D-1' })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -2218,6 +2244,8 @@ app.listen(PORT, async () => {
   }
 
   startIaFeedbackRunner(process.env)
+
+  startKommoEventsScheduler(process.env)
 
   // Otimizador de Prompt — seed da versão inicial e cache em memória
   await seedInitialVersionIfEmpty(process.env).catch((err) =>
