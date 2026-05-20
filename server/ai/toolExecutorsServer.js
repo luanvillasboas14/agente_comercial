@@ -215,7 +215,7 @@ function summarizeMetadataForLLM(metadata) {
   return s
 }
 
-async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10) {
+async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10, opts = {}) {
   const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL
   const key = env.SUPABASE_KEY || env.VITE_SUPABASE_KEY
   if (!url || !key) return 'Supabase não configurado no servidor.'
@@ -277,13 +277,32 @@ async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10)
     )
   }
 
+  // Filtro por nivel quando a IA passou o parametro.
+  // Usa extractPriceMeta + isPosTipo (ja importados/definidos no arquivo).
+  const nivelFiltro = String(opts?.nivel || '').toLowerCase().trim()
+  let dataFiltered = data
+  if (toolName === 'buscar_precos' && (nivelFiltro === 'graduacao' || nivelFiltro === 'pos')) {
+    const ehPos = nivelFiltro === 'pos'
+    dataFiltered = data.filter((d) => {
+      const meta = extractPriceMeta(d?.metadata)
+      if (!meta?.tipo) return false // sem nivel definido = nao garante = descartado
+      return isPosTipo(meta.tipo) === ehPos
+    })
+    console.log(
+      `[tool/buscar_precos/filter] nivel="${nivelFiltro}" antes=${data.length} depois=${dataFiltered.length}`,
+    )
+    if (dataFiltered.length === 0) {
+      return `Nenhum resultado encontrado na base para esse curso no nivel ${nivelFiltro === 'pos' ? 'pos-graduacao' : 'graduacao'}. Verifique se o curso existe nesse nivel ou ofereca transferir para um consultor.`
+    }
+  }
+
   // Anexa metadata legível ao texto pra o LLM — sem isso ele perdia
   // contexto crítico (link da grade, nível/modalidade do preço) e
   // alucinava (oferecia link inexistente, juntava preço de graduação
   // com preço de pós, etc).
   const isCourseTool = toolName === 'buscar_informacoes' || toolName === 'buscar_pos'
   const isPriceTool = toolName === 'buscar_precos'
-  return data
+  return dataFiltered
     .map((d) => {
       const base = d?.content || ''
       if (isCourseTool) {
@@ -472,8 +491,8 @@ function absorbToolMeta(ctx, raw) {
 export function buildToolExecutors(env, ctx) {
   const safeCtx = ctx || createNoopExecutionContext()
   return {
-    buscar_precos: async ({ query }) =>
-      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 16),
+    buscar_precos: async ({ query, nivel }) =>
+      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 16, { nivel }),
     buscar_informacoes: async ({ query }) =>
       vectorSearch(env, safeCtx, 'buscar_informacoes', 'match_documents', query, 15),
     buscar_pos: async ({ query }) =>

@@ -276,13 +276,18 @@ export const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'buscar_precos',
-      description: 'Busca preços e valores de cursos na base vetorial do Supabase. Use quando precisar de informações sobre mensalidades, valores e preços de cursos.',
+      description: 'Busca preços e valores de cursos. SEMPRE passe o parâmetro `nivel` quando souber pelo contexto da conversa se o lead quer graduação ou pós — assim a tool já filtra e você não recebe resultados do nível errado.',
       parameters: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'Nome limpo do curso para buscar preços (ex: "Administração", "Psicologia", "Recursos Humanos")',
+            description: 'Nome limpo do curso (ex: "Administração").',
+          },
+          nivel: {
+            type: 'string',
+            enum: ['graduacao', 'pos'],
+            description: 'Nível do curso. Use "graduacao" pra cursos de graduação (bacharelado, licenciatura, tecnólogo). Use "pos" pra pós-graduação, MBA ou especialização. OMITA APENAS se o contexto for genuinamente ambíguo — quando souber pelo histórico da conversa, passe sempre.',
           },
         },
         required: ['query'],
