@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { usePollingWhenVisible } from '../lib/usePollingWhenVisible'
 import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   AlertTriangle, CheckCircle, Clock, MessageSquare,
@@ -401,11 +402,8 @@ export default function FeedbackIAViewer() {
     fetchAll(true)
   }, [fetchAll])
 
-  // Polling a cada 30s
-  useEffect(() => {
-    const id = setInterval(() => fetchAll(false), 30_000)
-    return () => clearInterval(id)
-  }, [fetchAll])
+  // Polling 60s, pausa quando aba inativa
+  usePollingWhenVisible(() => fetchAll(false), 60_000, true)
 
   const handleFilter = () => {
     setPage(1)

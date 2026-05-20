@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { usePollingWhenVisible } from '../lib/usePollingWhenVisible'
 import {
   Search, Clock, RefreshCw, Copy, Check,
   MessageSquare, Zap, Users, FileCheck, AlertTriangle,
@@ -450,12 +451,14 @@ export default function FeedbackJobViewer() {
   useEffect(() => { fetchRuns() }, [fetchRuns])
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  // Tick de relógio para countdown/elapsed; e refetch do status a cada 10s
+  // Tick de relógio para countdown/elapsed
   useEffect(() => {
     const tick = setInterval(() => setNowMs(Date.now()), 1000)
-    const poll = setInterval(() => { fetchStatus() }, 10000)
-    return () => { clearInterval(tick); clearInterval(poll) }
-  }, [fetchStatus])
+    return () => clearInterval(tick)
+  }, [])
+
+  // Refetch do status: 60s, pausa quando aba inativa
+  usePollingWhenVisible(() => fetchStatus(), 60_000, true)
 
   const filtered = useMemo(() => {
     if (!search.trim()) return runs

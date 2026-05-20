@@ -52,7 +52,7 @@ import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionBy
 import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected, isProposalObsolete } from './server/iaFeedback/proposalsStore.js'
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
-import { refreshAgentRulesText, getFallbackAgentRulesText } from './server/ai/promptsLoader.js'
+import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -1993,8 +1993,7 @@ app.get('/api/ia-feedback/proposals', async (req, res) => {
       status: status || undefined,
       limit: limit ? Math.min(100, Math.max(1, Number(limit))) : 50,
     })
-    const activeVersion = await getActiveVersion(process.env).catch(() => null)
-    const activeText = activeVersion?.agent_rules_text || ''
+    const activeText = getAgentRulesText() // cache em memória, zero Supabase calls
     const enriched = proposals.map((p) => ({
       ...p,
       obsoleta: isProposalObsolete(p, activeText),
@@ -2010,8 +2009,7 @@ app.get('/api/ia-feedback/proposals/:id', async (req, res) => {
   try {
     const proposal = await getProposalById(process.env, req.params.id)
     if (!proposal) return res.status(404).json({ error: 'Proposta não encontrada' })
-    const activeVersion = await getActiveVersion(process.env).catch(() => null)
-    const activeText = activeVersion?.agent_rules_text || ''
+    const activeText = getAgentRulesText() // cache em memória, zero Supabase calls
     res.json({ ...proposal, obsoleta: isProposalObsolete(proposal, activeText) })
   } catch (e) {
     console.error('[ia-feedback/proposals/:id]', e.message)
