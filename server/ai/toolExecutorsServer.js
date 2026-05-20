@@ -492,7 +492,7 @@ export function buildToolExecutors(env, ctx) {
   const safeCtx = ctx || createNoopExecutionContext()
   return {
     buscar_precos: async ({ query, nivel }) =>
-      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 16, { nivel }),
+      vectorSearch(env, safeCtx, 'buscar_precos', 'match_documents_precos', query, 8, { nivel }),
     buscar_informacoes: async ({ query }) =>
       vectorSearch(env, safeCtx, 'buscar_informacoes', 'match_documents', query, 15),
     buscar_pos: async ({ query }) =>
