@@ -1,43 +1,9 @@
--- Tabelas pra auditoria diária de eventos Kommo (rodar no Supabase PRINCIPAL).
-create table if not exists public.kommo_event_sync_runs (
-  id bigserial primary key,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz,
-  reference_date date not null,
-  status text not null default 'running', -- running | success | failed | failed_critical
-  total_groups int not null default 0,
-  total_pages int not null default 0,
-  total_events_received int not null default 0,
-  total_events_inserted int not null default 0,
-  error_message text,
-  metadata jsonb not null default '{}'::jsonb
-);
-create index if not exists kommo_event_sync_runs_started_desc_idx
-  on public.kommo_event_sync_runs (started_at desc);
-create index if not exists kommo_event_sync_runs_ref_date_idx
-  on public.kommo_event_sync_runs (reference_date);
+-- Migration: estender consultor_metricas_diarias para retornar lista de gaps > 15min.
+-- Rodar no Supabase principal UMA VEZ.
+-- Atenção: o ALTER de uma function que muda return type exige drop+create.
 
-create table if not exists public.kommo_consultor_eventos (
-  id bigserial primary key,
-  kommo_event_id text unique not null,
-  created_at_kommo timestamptz not null,
-  created_by bigint,
-  entity_type text,
-  entity_id bigint,
-  event_type text,
-  event_data jsonb,
-  raw jsonb not null,
-  sync_run_id bigint references public.kommo_event_sync_runs(id) on delete set null,
-  inserted_at timestamptz not null default now()
-);
-create index if not exists kommo_consultor_eventos_created_by_at_idx
-  on public.kommo_consultor_eventos (created_by, created_at_kommo desc);
-create index if not exists kommo_consultor_eventos_created_at_idx
-  on public.kommo_consultor_eventos (created_at_kommo desc);
-create index if not exists kommo_consultor_eventos_entity_idx
-  on public.kommo_consultor_eventos (entity_type, entity_id);
+drop function if exists public.consultor_metricas_diarias(date);
 
--- Função de métricas. Calcula tempo ativo somando gaps <= 15min entre eventos.
 create or replace function public.consultor_metricas_diarias(p_data date)
 returns table (
   data date,

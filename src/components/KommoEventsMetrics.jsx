@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
 
 function getYesterdayISO() {
   const ms = Date.now() - 3 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000
@@ -31,11 +31,18 @@ function fmtTipoResumo(tipos) {
     .join(', ')
 }
 
+function gapSeverity(min) {
+  if (min >= 120) return 'var(--danger)'
+  if (min >= 60) return 'var(--warning)'
+  return 'var(--muted)'
+}
+
 export default function KommoEventsMetrics() {
   const [date, setDate] = useState(getYesterdayISO())
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [expanded, setExpanded] = useState(new Set())
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true)
@@ -45,6 +52,7 @@ export default function KommoEventsMetrics() {
       const data = await r.json()
       if (!r.ok) throw new Error(data?.error || 'falha ao carregar')
       setRows(Array.isArray(data?.rows) ? data.rows : [])
+      setExpanded(new Set())
     } catch (e) {
       setError(e.message)
     } finally {
@@ -53,6 +61,15 @@ export default function KommoEventsMetrics() {
   }, [date])
 
   useEffect(() => { fetchMetrics() }, [fetchMetrics])
+
+  const toggleRow = useCallback((id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   const sorted = [...rows].sort(
     (a, b) => (b.tempo_ativo_estimado_minutos || 0) - (a.tempo_ativo_estimado_minutos || 0)
@@ -63,7 +80,7 @@ export default function KommoEventsMetrics() {
       <div className="page-header">
         <div>
           <h1>Atividade Consultores</h1>
-          <p className="muted">Tempo trabalhado estimado por consultor (gaps ≤ 15min)</p>
+          <p className="muted">Tempo trabalhado estimado por consultor (gaps ≤ 15min) • clique pra ver intervalos de inatividade</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
@@ -92,32 +109,93 @@ export default function KommoEventsMetrics() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '10px 8px', width: 28 }}></th>
                 <th style={{ padding: '10px 8px' }}>Consultor</th>
                 <th style={{ padding: '10px 8px' }}>1ª ação</th>
                 <th style={{ padding: '10px 8px' }}>Última</th>
                 <th style={{ padding: '10px 8px' }}>Tempo ativo</th>
-                <th style={{ padding: '10px 8px' }}>Maior gap</th>
+                <th style={{ padding: '10px 8px' }}>Gaps {'>'}15min</th>
                 <th style={{ padding: '10px 8px' }}>Ações</th>
                 <th style={{ padding: '10px 8px' }}>Leads</th>
                 <th style={{ padding: '10px 8px' }}>Por tipo</th>
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r) => (
-                <tr key={r.consultor_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '10px 8px' }}>
-                    <div style={{ fontWeight: 600 }}>{r.consultor_nome || `ID ${r.consultor_id}`}</div>
-                    {r.consultor_nome && <div className="muted" style={{ fontSize: 11 }}>ID {r.consultor_id}</div>}
-                  </td>
-                  <td style={{ padding: '10px 8px' }}>{fmtTime(r.primeira_acao)}</td>
-                  <td style={{ padding: '10px 8px' }}>{fmtTime(r.ultima_acao)}</td>
-                  <td style={{ padding: '10px 8px', fontWeight: 600 }}>{fmtMin(r.tempo_ativo_estimado_minutos)}</td>
-                  <td style={{ padding: '10px 8px' }}>{fmtMin(r.maior_intervalo_sem_acao_minutos)}</td>
-                  <td style={{ padding: '10px 8px' }}>{r.total_acoes}</td>
-                  <td style={{ padding: '10px 8px' }}>{r.total_leads_unicos}</td>
-                  <td style={{ padding: '10px 8px', fontSize: 12 }} className="muted">{fmtTipoResumo(r.total_eventos_por_tipo)}</td>
-                </tr>
-              ))}
+              {sorted.map((r) => {
+                const gaps = Array.isArray(r.gaps_maiores_15min) ? r.gaps_maiores_15min : []
+                const isExpanded = expanded.has(r.consultor_id)
+                const hasGaps = gaps.length > 0
+                return (
+                  <Fragment key={r.consultor_id}>
+                    <tr
+                      style={{
+                        borderBottom: isExpanded ? 'none' : '1px solid var(--border)',
+                        cursor: hasGaps ? 'pointer' : 'default',
+                      }}
+                      onClick={() => hasGaps && toggleRow(r.consultor_id)}
+                    >
+                      <td style={{ padding: '10px 8px', color: 'var(--muted)' }}>
+                        {hasGaps ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <div style={{ fontWeight: 600 }}>{r.consultor_nome || `ID ${r.consultor_id}`}</div>
+                        {r.consultor_nome && <div className="muted" style={{ fontSize: 11 }}>ID {r.consultor_id}</div>}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>{fmtTime(r.primeira_acao)}</td>
+                      <td style={{ padding: '10px 8px' }}>{fmtTime(r.ultima_acao)}</td>
+                      <td style={{ padding: '10px 8px', fontWeight: 600 }}>{fmtMin(r.tempo_ativo_estimado_minutos)}</td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {hasGaps ? (
+                          <span>
+                            <span style={{ fontWeight: 600 }}>{gaps.length}</span>
+                            <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
+                              (maior {fmtMin(r.maior_intervalo_sem_acao_minutos)})
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>{r.total_acoes}</td>
+                      <td style={{ padding: '10px 8px' }}>{r.total_leads_unicos}</td>
+                      <td style={{ padding: '10px 8px', fontSize: 12 }} className="muted">{fmtTipoResumo(r.total_eventos_por_tipo)}</td>
+                    </tr>
+                    {isExpanded && hasGaps && (
+                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td colSpan={9} style={{ padding: '8px 12px 16px 40px', background: 'rgba(255,255,255,0.02)' }}>
+                          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                            Intervalos sem atividade de {r.consultor_nome || r.consultor_id}:
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 6 }}>
+                            {gaps.map((g, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  padding: '8px 10px',
+                                  borderRadius: 6,
+                                  border: '1px solid var(--border)',
+                                  fontSize: 13,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: 8,
+                                }}
+                              >
+                                <span style={{ fontFamily: 'monospace' }}>
+                                  {fmtTime(g.inicio)} → {fmtTime(g.fim)}
+                                </span>
+                                <span style={{ color: gapSeverity(g.duracao_minutos), fontWeight: 600 }}>
+                                  {fmtMin(g.duracao_minutos)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
