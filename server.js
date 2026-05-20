@@ -1810,31 +1810,24 @@ app.get('/api/ia-feedback/status', async (req, res) => {
     let recentes = []
 
     if (db) {
-      try {
-        lastRuns = await db.select(
-          'ia_feedback_job_runs',
-          'select=*&order=started_at.desc&limit=3',
-        )
-      } catch { /* silencioso */ }
+      const hoje = new Date()
+      hoje.setHours(0, 0, 0, 0)
+      const semanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-      try {
-        const hoje = new Date()
-        hoje.setHours(0, 0, 0, 0)
-        const semanaAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        const [rowsHoje, rowsSemana] = await Promise.all([
-          db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(hoje.toISOString())}`),
-          db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(semanaAtras.toISOString())}`),
-        ])
-        counts.hoje = Array.isArray(rowsHoje) ? rowsHoje.length : 0
-        counts.semana = Array.isArray(rowsSemana) ? rowsSemana.length : 0
-      } catch { /* silencioso */ }
-
-      try {
-        recentes = await db.select(
+      const [lastRunsRes, rowsHojeRes, rowsSemanaRes, recentesRes] = await Promise.all([
+        db.select('ia_feedback_job_runs', 'select=*&order=started_at.desc&limit=3').catch(() => []),
+        db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(hoje.toISOString())}`).catch(() => []),
+        db.select('ia_feedback', `select=id&created_at=gte.${encodeURIComponent(semanaAtras.toISOString())}`).catch(() => []),
+        db.select(
           'ia_feedback',
           'select=id,lead_id,telefone,nota_geral,veredito,total_mensagens,total_turnos_ia,detected_at,created_at&order=created_at.desc&limit=10',
-        )
-      } catch { /* silencioso */ }
+        ).catch(() => []),
+      ])
+
+      lastRuns = Array.isArray(lastRunsRes) ? lastRunsRes : []
+      counts.hoje = Array.isArray(rowsHojeRes) ? rowsHojeRes.length : 0
+      counts.semana = Array.isArray(rowsSemanaRes) ? rowsSemanaRes.length : 0
+      recentes = Array.isArray(recentesRes) ? recentesRes : []
     }
 
     res.json({ runner, lastRuns, counts, recentes })
