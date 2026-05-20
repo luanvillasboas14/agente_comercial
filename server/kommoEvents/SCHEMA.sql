@@ -19,7 +19,7 @@ create index if not exists kommo_event_sync_runs_ref_date_idx
 
 create table if not exists public.kommo_consultor_eventos (
   id bigserial primary key,
-  kommo_event_id bigint unique not null,
+  kommo_event_id text unique not null,
   created_at_kommo timestamptz not null,
   created_by bigint,
   entity_type text,

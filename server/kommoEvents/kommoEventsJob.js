@@ -245,17 +245,27 @@ async function finishSyncRun(db, runId, patch) {
 async function insertEventsBatch(db, events, syncRunId) {
   if (!events.length) return 0
 
-  const rows = events.map((e) => ({
-    kommo_event_id: Number(e.id),
-    created_at_kommo: new Date(Number(e.created_at) * 1000).toISOString(),
-    created_by: e.created_by != null ? Number(e.created_by) : null,
-    entity_type: e.entity || null,
-    entity_id: e.entity_id != null ? Number(e.entity_id) : null,
-    event_type: e.type || null,
-    event_data: e.value_after ?? null,
-    raw: e,
-    sync_run_id: syncRunId,
-  }))
+  const rows = events
+    .map((e) => {
+      const id = e?.id != null ? String(e.id) : ''
+      if (!id) return null
+      const createdAtSec = Number(e?.created_at)
+      const createdAtIso = Number.isFinite(createdAtSec) && createdAtSec > 0
+        ? new Date(createdAtSec * 1000).toISOString()
+        : new Date().toISOString()
+      return {
+        kommo_event_id: id,
+        created_at_kommo: createdAtIso,
+        created_by: e?.created_by != null ? Number(e.created_by) : null,
+        entity_type: e?.entity_type || e?.entity || null,
+        entity_id: e?.entity_id != null ? Number(e.entity_id) : null,
+        event_type: e?.type || null,
+        event_data: e?.value_after ?? null,
+        raw: e,
+        sync_run_id: syncRunId,
+      }
+    })
+    .filter(Boolean)
 
   const CHUNK = 100
   let totalInserted = 0
