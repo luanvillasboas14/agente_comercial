@@ -4,6 +4,18 @@
 
 import { getFeedbackSupabase } from './supabaseClient.js'
 
+/**
+ * Verifica se o trecho_antes da proposta ainda existe no texto ativo do prompt.
+ * Usa string.includes (literal) — match flexível só vale no momento de criar a proposta.
+ */
+export function isProposalObsolete(proposal, activeAgentRulesText) {
+  if (!proposal || !activeAgentRulesText) return false
+  if (proposal.tipo_mudanca === 'nenhuma') return false
+  if (proposal.status !== 'pendente') return false
+  if (!proposal.trecho_antes) return true
+  return !activeAgentRulesText.includes(proposal.trecho_antes)
+}
+
 function getClient(env) {
   const sb = getFeedbackSupabase(env)
   if (!sb) throw new Error('[proposalsStore/config] SUPABASE_URL_FEEDBACK / SUPABASE_KEY_FEEDBACK não configurados')

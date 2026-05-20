@@ -49,7 +49,7 @@ import { reindexPerguntas } from './server/ai/reindexPerguntas.js'
 import { startIaFeedbackRunner, getIaFeedbackRunnerStatus } from './server/iaFeedbackRunner.js'
 import { evaluateLead } from './server/iaFeedbackJob.js'
 import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionById, createVersionAndActivate, rollbackToVersion } from './server/iaFeedback/promptVersionStore.js'
-import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected } from './server/iaFeedback/proposalsStore.js'
+import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected, isProposalObsolete } from './server/iaFeedback/proposalsStore.js'
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText } from './server/ai/promptsLoader.js'
@@ -1993,7 +1993,13 @@ app.get('/api/ia-feedback/proposals', async (req, res) => {
       status: status || undefined,
       limit: limit ? Math.min(100, Math.max(1, Number(limit))) : 50,
     })
-    res.json(proposals)
+    const activeVersion = await getActiveVersion(process.env).catch(() => null)
+    const activeText = activeVersion?.agent_rules_text || ''
+    const enriched = proposals.map((p) => ({
+      ...p,
+      obsoleta: isProposalObsolete(p, activeText),
+    }))
+    res.json(enriched)
   } catch (e) {
     console.error('[ia-feedback/proposals]', e.message)
     res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
@@ -2004,7 +2010,9 @@ app.get('/api/ia-feedback/proposals/:id', async (req, res) => {
   try {
     const proposal = await getProposalById(process.env, req.params.id)
     if (!proposal) return res.status(404).json({ error: 'Proposta não encontrada' })
-    res.json(proposal)
+    const activeVersion = await getActiveVersion(process.env).catch(() => null)
+    const activeText = activeVersion?.agent_rules_text || ''
+    res.json({ ...proposal, obsoleta: isProposalObsolete(proposal, activeText) })
   } catch (e) {
     console.error('[ia-feedback/proposals/:id]', e.message)
     res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
@@ -2063,9 +2071,7 @@ app.post('/api/ia-feedback/proposals/:id/reject', async (req, res) => {
 app.post('/api/ia-feedback/proposals/:id/reanalyze', async (req, res) => {
   try {
     const { instrucao_extra } = req.body || {}
-    if (!instrucao_extra || typeof instrucao_extra !== 'string' || !instrucao_extra.trim()) {
-      return res.status(400).json({ error: 'instrucao_extra é obrigatório (texto explicando o que estava errado na proposta anterior)' })
-    }
+    const instrucao = typeof instrucao_extra === 'string' && instrucao_extra.trim() ? instrucao_extra.trim() : null
 
     const propostaAntiga = await getProposalById(process.env, req.params.id)
     if (!propostaAntiga) return res.status(404).json({ error: 'Proposta não encontrada' })
@@ -2085,7 +2091,7 @@ app.post('/api/ia-feedback/proposals/:id/reanalyze', async (req, res) => {
       regraAlvo: propostaAntiga.regra_alvo,
       ranking: rankingData,
       activeVersion,
-      instrucaoExtra: instrucao_extra.trim(),
+      instrucaoExtra: instrucao,
     })
 
     if (propostaAntiga.status === 'pendente') {

@@ -256,6 +256,7 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
   const [accepting, setAccepting] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [reanalyzing, setReanalyzing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [showReanalyzeBox, setShowReanalyzeBox] = useState(false)
   const [instrucaoExtra, setInstrucaoExtra] = useState('')
   const [exemploOpen, setExemploOpen] = useState(false)
@@ -306,6 +307,19 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
     }
   }
 
+  async function handleRefreshWithCurrent() {
+    setError(null)
+    setRefreshing(true)
+    try {
+      await reanalyzeProposal(proposal.id, '')
+      onRejected?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   return (
     <div style={{
       borderRadius: 12, border: `1px solid ${proposal.status === 'pendente' ? 'var(--accent-line)' : 'var(--line-1)'}`,
@@ -321,6 +335,17 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
           Proposta para {proposal.regra_alvo}
         </span>
         <StatusBadge status={proposal.status} />
+        {proposal.obsoleta && proposal.status === 'pendente' && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+            background: 'oklch(78% 0.14 75 / 0.15)', color: 'oklch(40% 0.14 75)',
+            border: '1px solid oklch(78% 0.14 75 / 0.35)',
+            textTransform: 'uppercase', letterSpacing: 0.04,
+          }} title="O trecho_antes desta proposta não casa mais no prompt atual (outra proposta foi aceita antes). Reanalise para gerar nova proposta baseada no prompt atual.">
+            <AlertTriangle size={10} /> Obsoleta
+          </span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--fg-3)', marginLeft: 'auto' }}>{fmt(proposal.created_at)}</span>
         <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.modelo_analisador}</span>
         <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.total_violacoes} violações</span>
@@ -485,31 +510,63 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
         {/* Ações */}
         {proposal.status === 'pendente' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {proposal.obsoleta && (
+              <div style={{
+                padding: '10px 12px', borderRadius: 8, fontSize: 12,
+                background: 'oklch(78% 0.14 75 / 0.08)', border: '1px solid oklch(78% 0.14 75 / 0.30)',
+                color: 'oklch(40% 0.14 75)',
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+              }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <strong>Proposta obsoleta.</strong> O trecho original que essa proposta queria mudar não existe mais no prompt atual — provavelmente outra proposta foi aceita antes. As violações registradas continuam válidas, mas você precisa reanalisar pra gerar uma nova proposta baseada no prompt atual.
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 onClick={handleAccept}
-                disabled={accepting || rejecting || reanalyzing}
+                disabled={accepting || rejecting || reanalyzing || refreshing || proposal.obsoleta}
+                title={proposal.obsoleta ? 'Proposta obsoleta — reanalise antes' : ''}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600,
                   background: accepting ? 'var(--bg-2)' : 'oklch(72% 0.14 155 / 0.18)',
                   border: '1px solid oklch(72% 0.14 155 / 0.40)',
                   color: 'oklch(35% 0.14 155)',
-                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                  opacity: proposal.obsoleta ? 0.5 : 1,
+                  cursor: (accepting || rejecting || reanalyzing || refreshing || proposal.obsoleta) ? 'not-allowed' : 'pointer',
                 }}
               >
                 {accepting ? <Loader size={12} className="spin" /> : <CheckCircle size={12} />}
                 Aceitar e aplicar
               </button>
+              {proposal.obsoleta && (
+                <button
+                  onClick={handleRefreshWithCurrent}
+                  disabled={refreshing || accepting || rejecting || reanalyzing}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    background: 'oklch(60% 0.18 240 / 0.15)', border: '1px solid oklch(60% 0.18 240 / 0.40)',
+                    color: 'oklch(40% 0.18 240)',
+                    cursor: refreshing ? 'not-allowed' : 'pointer',
+                    opacity: refreshing ? 0.6 : 1,
+                  }}
+                >
+                  {refreshing ? <Loader size={12} className="spin" /> : <RefreshCw size={12} />}
+                  Reanalisar com prompt atual
+                </button>
+              )}
               <button
                 onClick={handleReject}
-                disabled={accepting || rejecting || reanalyzing}
+                disabled={accepting || rejecting || reanalyzing || refreshing}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
                   background: 'var(--bg-1)', border: '1px solid var(--line-1)',
                   color: 'var(--fg-3)',
-                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                  cursor: (accepting || rejecting || reanalyzing || refreshing) ? 'not-allowed' : 'pointer',
                 }}
               >
                 {rejecting ? <Loader size={12} className="spin" /> : <X size={12} />}
@@ -517,13 +574,13 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
               </button>
               <button
                 onClick={() => setShowReanalyzeBox((p) => !p)}
-                disabled={accepting || rejecting || reanalyzing}
+                disabled={accepting || rejecting || reanalyzing || refreshing}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500,
                   background: 'oklch(78% 0.14 75 / 0.12)', border: '1px solid oklch(78% 0.14 75 / 0.35)',
                   color: 'oklch(40% 0.14 75)',
-                  cursor: accepting || rejecting || reanalyzing ? 'not-allowed' : 'pointer',
+                  cursor: (accepting || rejecting || reanalyzing || refreshing) ? 'not-allowed' : 'pointer',
                 }}
               >
                 <Wand2 size={12} />
@@ -578,7 +635,7 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
 
 // ─── Seção 1: Ranking de violações ───────────────────────────────────────────
 
-function ViolationsRanking({ onAnalyzeComplete }) {
+function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
   const [ranking, setRanking] = useState(null)
   const [loading, setLoading] = useState(false)
   const [analyzing, setAnalyzing] = useState(null)
@@ -599,7 +656,7 @@ function ViolationsRanking({ onAnalyzeComplete }) {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [refreshKey])
 
   async function handleAnalyze(regra) {
     setAnalyzeError(null)
@@ -793,7 +850,7 @@ function ViolationsRanking({ onAnalyzeComplete }) {
 
 // ─── Seção 2: Propostas ───────────────────────────────────────────────────────
 
-function ProposalsSection({ refreshKey }) {
+function ProposalsSection({ refreshKey, onVersionChanged }) {
   const [proposals, setProposals] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState('pendente')
@@ -875,7 +932,10 @@ function ProposalsSection({ refreshKey }) {
                 <ProposalCard
                   key={p.id}
                   proposal={p}
-                  onAccepted={() => load(filterStatus)}
+                  onAccepted={() => {
+                    onVersionChanged?.()
+                    load(filterStatus)
+                  }}
                   onRejected={() => load(filterStatus)}
                 />
               ))}
@@ -892,6 +952,7 @@ export default function PromptOptimizer() {
   const [activeVersionInfo, setActiveVersionInfo] = useState(null)
   const [loadingVersion, setLoadingVersion] = useState(true)
   const [proposalRefreshKey, setProposalRefreshKey] = useState(0)
+  const [rankingRefreshKey, setRankingRefreshKey] = useState(0)
   const [syncing, setSyncing] = useState(false)
 
   const loadVersion = useCallback(() => {
@@ -909,12 +970,17 @@ export default function PromptOptimizer() {
     setProposalRefreshKey((k) => k + 1)
   }
 
+  function handleVersionChanged() {
+    loadVersion()
+    setRankingRefreshKey((k) => k + 1)
+  }
+
   async function handleSyncFromFallback() {
     if (!confirm('Criar nova versão ativa a partir do FALLBACK_AGENT_RULES_TEXT do código? Use isso quando o texto hardcoded foi atualizado e você quer aplicar em produção.')) return
     setSyncing(true)
     try {
       const result = await syncPromptFromFallback()
-      loadVersion()
+      handleVersionChanged()
       alert(`Versão v${result.new_version?.versao} criada e ativada.`)
     } catch (err) {
       alert(err.message)
@@ -974,13 +1040,13 @@ export default function PromptOptimizer() {
       </div>
 
       {/* Seção 1: Ranking */}
-      <ViolationsRanking onAnalyzeComplete={handleAnalyzeComplete} />
+      <ViolationsRanking onAnalyzeComplete={handleAnalyzeComplete} refreshKey={rankingRefreshKey} />
 
       {/* Seção 2: Propostas */}
-      <ProposalsSection refreshKey={proposalRefreshKey} />
+      <ProposalsSection refreshKey={proposalRefreshKey} onVersionChanged={handleVersionChanged} />
 
       {/* Seção 3: Histórico de versões */}
-      <VersionHistory onVersionActivated={loadVersion} />
+      <VersionHistory onVersionActivated={handleVersionChanged} />
     </div>
   )
 }

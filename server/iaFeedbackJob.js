@@ -312,6 +312,29 @@ VEREDITO E NOTA
 - Nota geral (0.0 a 10.0): considere quantidade e severidade das violações + qualidade geral do atendimento.
 
 ═══════════════════════════════════════════════════════════════
+CASOS QUE NÃO SÃO VIOLAÇÃO (NÃO MARCAR)
+═══════════════════════════════════════════════════════════════
+
+Antes de marcar uma violação, verifique se o caso se encaixa em alguma destas exceções legítimas. Se sim, NÃO marque como violação — a IA agiu corretamente:
+
+A) ALTERNATIVAS APÓS BUSCA SEM RESULTADO NA MODALIDADE PEDIDA.
+   Se o lead pediu curso X na modalidade Y, a tool não retornou X na modalidade Y, e a IA ofereceu OUTROS cursos disponíveis na modalidade Y, NÃO é violação. A IA está fazendo seu trabalho de redirecionar pra opções reais. Ex.: "Não temos Enfermagem semipresencial, mas temos Fisioterapia, Nutrição, Gerontologia..." → CORRETO.
+
+B) CONFIRMAÇÃO DE CURSO EM AMBIGUIDADE (Regra 19).
+   Se o lead mencionou 2+ cursos na conversa (interesse + formação prévia, ou múltiplas perguntas) e a IA perguntou em qual ele quer focar, NÃO é violação — é exatamente o que a Regra 19 manda fazer. Ex.: "Só pra confirmar: é o curso de Pós-graduação em Psicopedagogia que você quer fazer?" depois do lead alternar entre cursos → CORRETO.
+
+C) PÓS-GRADUAÇÃO E GRADE.
+   Cursos de PÓS-GRADUAÇÃO, MBA e ESPECIALIZAÇÃO NÃO TÊM marcador [STATUS DA GRADE] no sistema atual — a infraestrutura de grades só existe pra graduação. Portanto:
+   - Se a IA disse algo como "essas opções de pós não têm grade detalhada disponível" ou "não tenho grade dessas pós aqui", NÃO marque como violação da Regra 13c. Pra pós, é informação correta.
+   - A Regra 13c só vale pra contexto de GRADUAÇÃO (onde existe o marcador). Pra pós, a IA pode informar a ausência de grade detalhada normalmente, sem precisar transferir pra humano.
+   - Se o lead pedir grade EXPLICITAMENTE de uma pós ("me manda a grade do MBA"), aí sim aplica a regra 13d (distribuir_humano + acolhedora).
+
+D) CTA NATURAL APÓS PROGRESSÃO.
+   Se a IA confirmou um detalhe simples antes de seguir ("Você quer iniciar a inscrição?" depois de passar informações) e o lead pediu progresso, isso NÃO é violação da Regra 16. Pedir confirmação UMA vez antes de uma ação que requer dado é razoável.
+
+Em caso de dúvida sobre se algo é violação ou se cai numa exceção, PREFIRA NÃO MARCAR como violação. Marcar falsos positivos polui o ranking e leva a mudanças erradas no prompt.
+
+═══════════════════════════════════════════════════════════════
 FORMATO DE SAÍDA (OBRIGATÓRIO)
 ═══════════════════════════════════════════════════════════════
 
