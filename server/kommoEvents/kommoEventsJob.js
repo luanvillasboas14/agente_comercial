@@ -253,6 +253,7 @@ async function insertEventsBatch(db, events, syncRunId) {
       const createdAtIso = Number.isFinite(createdAtSec) && createdAtSec > 0
         ? new Date(createdAtSec * 1000).toISOString()
         : new Date().toISOString()
+      const hasValueData = e?.value_after != null || e?.value_before != null
       return {
         kommo_event_id: id,
         created_at_kommo: createdAtIso,
@@ -260,7 +261,9 @@ async function insertEventsBatch(db, events, syncRunId) {
         entity_type: e?.entity_type || e?.entity || null,
         entity_id: e?.entity_id != null ? Number(e.entity_id) : null,
         event_type: e?.type || null,
-        event_data: e?.value_after ?? null,
+        event_data: hasValueData
+          ? { value_after: e?.value_after ?? null, value_before: e?.value_before ?? null }
+          : null,
         raw: e,
         sync_run_id: syncRunId,
       }
@@ -269,6 +272,15 @@ async function insertEventsBatch(db, events, syncRunId) {
 
   const CHUNK = 100
   let totalInserted = 0
+  const totalPreparados = rows.length
+  const totalRecebidos = events.length
+  const totalDescartados = totalRecebidos - totalPreparados
+
+  if (totalDescartados > 0) {
+    console.warn(
+      `[KommoEvents] normalize: ${totalDescartados} eventos descartados por falta de id (recebidos=${totalRecebidos} preparados=${totalPreparados})`,
+    )
+  }
 
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK)
@@ -281,6 +293,9 @@ async function insertEventsBatch(db, events, syncRunId) {
     )
     const count = Array.isArray(inserted) ? inserted.length : 0
     totalInserted += count
+    console.log(
+      `[KommoEvents] insert chunk ${Math.floor(i / CHUNK) + 1}: enviados=${chunk.length} inseridos=${count} ignorados=${chunk.length - count}`,
+    )
   }
 
   return totalInserted
