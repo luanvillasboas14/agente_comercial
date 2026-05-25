@@ -10,6 +10,7 @@ import {
   archiveExample,
   triggerDetectorNow,
   loadDetectorStatus,
+  loadAnalyzerStatus,
 } from '../lib/iaLearningStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -458,18 +459,58 @@ export default function AprendizadoIA() {
     setSuccessMsg(null)
     setAnalyzing(true)
     try {
-      const result = await triggerBatchAnalysis()
-      if (result.ok) {
-        setSuccessMsg(`Análise concluída! Regras geradas: ${result.regrasGeradas} · Exemplos gerados: ${result.exemplosGerados}`)
-        fetchStatus()
-        fetchRecentes()
-        fetchBatches()
-      } else {
-        setError(`Análise não iniciou: ${result.reason}${result.pendentes != null ? ` (pendentes: ${result.pendentes}/${result.min})` : ''}`)
-      }
+      await triggerBatchAnalysis()
+      setSuccessMsg('Análise iniciada. Acompanhando progresso...')
+      pollAnalyzerUntilDone()
     } catch (e) {
       setError(e.message)
+      setAnalyzing(false)
     }
+  }
+
+  async function pollAnalyzerUntilDone() {
+    const triggerTs = Date.now()
+    await new Promise((r) => setTimeout(r, 1500))
+    const pollInterval = 4000
+    const maxWaitMs = 20 * 60 * 1000
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt < maxWaitMs) {
+      let st
+      try {
+        st = await loadAnalyzerStatus()
+      } catch {
+        await new Promise((r) => setTimeout(r, pollInterval))
+        continue
+      }
+
+      if (st.running) {
+        const elapsedSec = st.startedAt
+          ? Math.round((Date.now() - new Date(st.startedAt).getTime()) / 1000)
+          : 0
+        setSuccessMsg(`Analisando batch no o3-mini... ${elapsedSec}s (pode levar alguns minutos)`)
+      } else if (st.lastResult && new Date(st.lastResult.finishedAt).getTime() >= triggerTs) {
+        const r = st.lastResult
+        const dur = Math.round((r.durationMs || 0) / 1000)
+        if (r.ok) {
+          setSuccessMsg(
+            `✓ Análise concluída em ${dur}s · Regras: ${r.regrasGeradas ?? 0} · Exemplos: ${r.exemplosGerados ?? 0} (de ${r.totalLeads ?? '?'} conversas)`,
+          )
+          fetchStatus()
+          fetchRecentes()
+          fetchBatches()
+        } else {
+          const detail = r.reason
+            ? `${r.reason}${r.pendentes != null ? ` (pendentes ${r.pendentes}/${r.min})` : ''}`
+            : (r.error || 'erro desconhecido')
+          setError(`Análise falhou: ${detail} (após ${dur}s)`)
+        }
+        setAnalyzing(false)
+        return
+      }
+      await new Promise((r) => setTimeout(r, pollInterval))
+    }
+    setError('Timeout: análise excedeu 20min sem retornar status.')
     setAnalyzing(false)
   }
 

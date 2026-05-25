@@ -1,73 +1,71 @@
+/**
+ * Wrapper de fetch+json que detecta resposta HTML (timeout de proxy,
+ * fallback de SPA, página de erro) e dá mensagem clara em vez do
+ * críptico "Unexpected token '<', \"<!DOCTYPE\"... is not valid JSON".
+ */
+async function fetchJson(url, opts) {
+  const res = await fetch(url, opts)
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('application/json')) {
+    const txt = await res.text().catch(() => '')
+    const isHtml = txt.trim().toLowerCase().startsWith('<!doctype') || txt.trim().startsWith('<')
+    if (isHtml) {
+      throw new Error(`servidor não respondeu JSON (provável timeout/proxy) — endpoint: ${url} status=${res.status}`)
+    }
+    throw new Error(`resposta inesperada (status=${res.status}, ct=${ct})`)
+  }
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}
+
 export async function loadStatus() {
-  const res = await fetch('/api/ia-learning/status')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+  return fetchJson('/api/ia-learning/status')
 }
 
 export async function loadConvertidosRecentes(limit = 50) {
-  const res = await fetch(`/api/ia-learning/convertidos?limit=${limit}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson(`/api/ia-learning/convertidos?limit=${limit}`)
   return data.rows || []
 }
 
 export async function triggerBatchAnalysis() {
-  const res = await fetch('/api/ia-learning/analyze', { method: 'POST' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return fetchJson('/api/ia-learning/analyze', { method: 'POST' })
+}
+
+export async function loadAnalyzerStatus() {
+  return fetchJson('/api/ia-learning/analyze/status')
 }
 
 export async function loadBatches(limit = 20) {
-  const res = await fetch(`/api/ia-learning/batches?limit=${limit}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson(`/api/ia-learning/batches?limit=${limit}`)
   return data.rows || []
 }
 
 export async function getBatchDetail(id) {
-  const res = await fetch(`/api/ia-learning/batches/${id}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+  return fetchJson(`/api/ia-learning/batches/${id}`)
 }
 
 export async function loadExamples(status = 'ativo') {
-  const res = await fetch(`/api/ia-learning/examples?status=${encodeURIComponent(status)}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson(`/api/ia-learning/examples?status=${encodeURIComponent(status)}`)
   return data.rows || []
 }
 
 export async function activateExample(id) {
-  const res = await fetch(`/api/ia-learning/examples/${id}/activate`, { method: 'POST' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return fetchJson(`/api/ia-learning/examples/${id}/activate`, { method: 'POST' })
 }
 
 export async function rejectExample(id) {
-  const res = await fetch(`/api/ia-learning/examples/${id}/reject`, { method: 'POST' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return fetchJson(`/api/ia-learning/examples/${id}/reject`, { method: 'POST' })
 }
 
 export async function archiveExample(id) {
-  const res = await fetch(`/api/ia-learning/examples/${id}/archive`, { method: 'POST' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return fetchJson(`/api/ia-learning/examples/${id}/archive`, { method: 'POST' })
 }
 
 export async function triggerDetectorNow() {
-  const res = await fetch('/api/ia-learning/detector/run-now', { method: 'POST' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return fetchJson('/api/ia-learning/detector/run-now', { method: 'POST' })
 }
 
 export async function loadDetectorStatus() {
-  const res = await fetch('/api/ia-learning/detector/status')
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+  return fetchJson('/api/ia-learning/detector/status')
 }

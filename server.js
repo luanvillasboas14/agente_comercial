@@ -56,7 +56,7 @@ import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
 import { startDetectorScheduler, runOnce as runDetectorOnce, getDetectorRunnerStatus } from './server/iaLearning/detectorRunner.js'
-import { runBatchAnalysis } from './server/iaLearning/batchAnalyzer.js'
+import { runAnalyzerOnce, getAnalyzerRunnerStatus } from './server/iaLearning/analyzerRunner.js'
 import { listRecentes, listPendentes, countPendentes } from './server/iaLearning/leadsConvertidosStore.js'
 import { listBatches, getBatch } from './server/iaLearning/batchesStore.js'
 import { listExamples, activateExample, rejectExample, archiveExample } from './server/iaLearning/examplesStore.js'
@@ -339,14 +339,22 @@ app.get('/api/ia-learning/convertidos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-app.post('/api/ia-learning/analyze', async (req, res) => {
+app.post('/api/ia-learning/analyze', async (_req, res) => {
   try {
-    const result = await runBatchAnalysis(process.env, { trigger: 'manual' })
-    res.json(result)
+    // Dispara em background — retorna imediatamente.
+    // O batch pode levar minutos com o3-mini, então frontend faz polling em /analyze/status.
+    runAnalyzerOnce(process.env, 'manual').catch((e) => console.error('[ia-learning/analyze] FAIL:', e.message))
+    res.json({ ok: true, started: true })
   } catch (e) {
     console.error('[ia-learning/analyze]', e.message)
-    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+    res.status(500).json({ error: e.message })
   }
+})
+
+app.get('/api/ia-learning/analyze/status', (_req, res) => {
+  try {
+    res.json(getAnalyzerRunnerStatus())
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 app.post('/api/ia-learning/detector/run-now', async (_req, res) => {
