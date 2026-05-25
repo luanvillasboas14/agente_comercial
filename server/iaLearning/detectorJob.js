@@ -27,25 +27,32 @@ export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
   // 1) Busca eventos de mudança de status pro aceite nos últimos 7 dias
   let eventos = []
   try {
+    // Filtra diretamente no PostgREST via contains JSONB — pega só os eventos
+    // que mudaram pro status/pipeline alvo, sem trazer 15k+ rows desnecessárias.
+    const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    const containsObj = {
+      value_after: [{ lead_status: { id: aceiteStatusId, pipeline_id: aceitePipelineId } }],
+    }
+    const containsCs = encodeURIComponent(JSON.stringify(containsObj))
     const rows = await db.select(
       'kommo_consultor_eventos',
       `select=entity_id,created_at_kommo,created_by,raw` +
       `&event_type=eq.lead_status_changed` +
+      `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+      `&raw=cs.${containsCs}` +
       `&order=created_at_kommo.desc` +
-      `&limit=500`,
+      `&limit=1000`,
     )
-    const all = Array.isArray(rows) ? rows : []
-    // Filtra pelo status e pipeline corretos no event_data
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
-    eventos = all.filter((r) => {
-      if (!r.created_at_kommo || r.created_at_kommo < sevenDaysAgo) return false
+    // PostgREST já filtrou; mas mantenho check defensivo
+    eventos = (Array.isArray(rows) ? rows : []).filter((r) => {
       const raw = r.raw || {}
       const valueAfterArr = raw?.value_after || raw?.data?.value_after || []
       const va = Array.isArray(valueAfterArr) ? valueAfterArr[0] : valueAfterArr
       if (!va) return false
+      const ls = va?.lead_status || va
       return (
-        Number(va.status_id) === aceiteStatusId &&
-        Number(va.pipeline_id) === aceitePipelineId
+        Number(ls?.id) === aceiteStatusId &&
+        Number(ls?.pipeline_id) === aceitePipelineId
       )
     })
   } catch (e) {
@@ -97,11 +104,12 @@ export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
     const { snapshot, fonte, totalMensagens, error: captureError } = captureResult
     if (captureError) errosCaptura += 1
 
-    // Extrai pipeline_id do evento raw
+    // Extrai pipeline_id do evento raw (estrutura: value_after[0].lead_status.pipeline_id)
     const raw = evento.raw || {}
     const valueAfterArr = raw?.value_after || raw?.data?.value_after || []
     const va = Array.isArray(valueAfterArr) ? valueAfterArr[0] : valueAfterArr
-    const pipelineId = Number(va?.pipeline_id) || aceitePipelineId
+    const ls = va?.lead_status || va
+    const pipelineId = Number(ls?.pipeline_id) || aceitePipelineId
 
     try {
       await insertLeadConvertido(env, {
