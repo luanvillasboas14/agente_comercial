@@ -11,6 +11,9 @@ import {
   triggerDetectorNow,
   loadDetectorStatus,
   loadAnalyzerStatus,
+  loadAprendizadoProposals,
+  applyProposal,
+  rejectProposal,
 } from '../lib/iaLearningStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -395,6 +398,122 @@ function TabExemplos({ examples, loading, filterStatus, onFilterChange, onAction
   )
 }
 
+// ─── Sub-tab Propostas de regras ──────────────────────────────────────────────
+
+function ProposalCard({ proposal, onApply, onReject, busy }) {
+  const [expanded, setExpanded] = useState(false)
+  const isAdicao = !proposal.trecho_antes || proposal.trecho_antes.trim() === ''
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}>{proposal.regra_alvo}</span>
+            <span style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              padding: '2px 7px', borderRadius: 4,
+              background: isAdicao ? 'oklch(72% 0.14 155 / 0.15)' : 'oklch(78% 0.14 75 / 0.15)',
+              color: isAdicao ? 'oklch(35% 0.14 155)' : 'oklch(40% 0.14 75)',
+            }}>
+              {isAdicao ? 'adição' : 'ajuste'}
+            </span>
+            <span style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              padding: '2px 7px', borderRadius: 4,
+              background: '#8b5cf622', color: '#8b5cf6',
+            }}>
+              aprendizado
+            </span>
+            {proposal.support_count != null && (
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· apoio: {proposal.support_count} conversas</span>
+            )}
+            {proposal.obsoleta && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'oklch(40% 0.20 25)', padding: '2px 7px', borderRadius: 4, background: 'oklch(68% 0.20 25 / 0.15)' }}>
+                OBSOLETA
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--fg-2)' }}>{proposal.justificativa}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn btn-sm" onClick={() => setExpanded((v) => !v)} style={{ fontSize: 11 }}>
+            {expanded ? 'Ocultar' : 'Ver diff'}
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => onApply(proposal.id)}
+            disabled={busy || proposal.obsoleta}
+            style={{ fontSize: 11 }}
+            title={proposal.obsoleta ? 'Proposta desatualizada — rejeite e refaça análise' : 'Aplica como nova versão do prompt'}
+          >
+            Aplicar
+          </button>
+          <button className="btn btn-sm" onClick={() => onReject(proposal.id)} disabled={busy} style={{ fontSize: 11 }}>
+            Rejeitar
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 8, fontSize: 12 }}>
+          {!isAdicao && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 4 }}>TRECHO ANTES</div>
+              <pre style={{
+                padding: 10, borderRadius: 6, background: 'oklch(68% 0.20 25 / 0.08)',
+                border: '1px solid oklch(68% 0.20 25 / 0.25)', color: 'var(--fg-1)',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, fontSize: 12,
+              }}>{proposal.trecho_antes}</pre>
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', marginBottom: 4 }}>
+              {isAdicao ? 'NOVO TEXTO A ADICIONAR' : 'TRECHO DEPOIS'}
+            </div>
+            <pre style={{
+              padding: 10, borderRadius: 6, background: 'oklch(72% 0.14 155 / 0.08)',
+              border: '1px solid oklch(72% 0.14 155 / 0.25)', color: 'var(--fg-1)',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, fontSize: 12,
+            }}>{proposal.trecho_depois}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TabPropostas({ proposals, loading, onApply, onReject, onRefresh, busyId }) {
+  if (loading) {
+    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>Carregando propostas...</div>
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
+          {proposals.length} proposta(s) pendente(s) geradas pelo Aprendizado IA
+        </div>
+        <button className="btn btn-sm" onClick={onRefresh} style={{ fontSize: 12 }}>Atualizar</button>
+      </div>
+      {proposals.length === 0 ? (
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
+          Nenhuma proposta pendente. Rode "Analisar batch agora" na aba "Conversões pendentes" para gerar propostas a partir das conversas convertidas.
+        </div>
+      ) : (
+        proposals.map((p) => (
+          <ProposalCard
+            key={p.id}
+            proposal={p}
+            onApply={onApply}
+            onReject={onReject}
+            busy={busyId === p.id}
+          />
+        ))
+      )}
+    </div>
+  )
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function AprendizadoIA() {
@@ -404,11 +523,14 @@ export default function AprendizadoIA() {
   const [batches, setBatches] = useState([])
   const [examples, setExamples] = useState([])
   const [filterStatus, setFilterStatus] = useState('ativo')
+  const [proposals, setProposals] = useState([])
+  const [busyProposalId, setBusyProposalId] = useState(null)
 
   const [loadingStatus, setLoadingStatus] = useState(true)
   const [loadingRecentes, setLoadingRecentes] = useState(true)
   const [loadingBatches, setLoadingBatches] = useState(true)
   const [loadingExamples, setLoadingExamples] = useState(true)
+  const [loadingProposals, setLoadingProposals] = useState(true)
 
   const [analyzing, setAnalyzing] = useState(false)
   const [detecting, setDetecting] = useState(false)
@@ -439,11 +561,18 @@ export default function AprendizadoIA() {
     setLoadingExamples(false)
   }, [filterStatus])
 
+  const fetchProposals = useCallback(async () => {
+    setLoadingProposals(true)
+    try { setProposals(await loadAprendizadoProposals()) } catch (_) {}
+    setLoadingProposals(false)
+  }, [])
+
   useEffect(() => {
     fetchStatus()
     fetchRecentes()
     fetchBatches()
-  }, [fetchStatus, fetchRecentes, fetchBatches])
+    fetchProposals()
+  }, [fetchStatus, fetchRecentes, fetchBatches, fetchProposals])
 
   useEffect(() => { fetchExamples() }, [fetchExamples])
 
@@ -452,7 +581,36 @@ export default function AprendizadoIA() {
     if (subTab === 'conversoes') fetchRecentes()
     if (subTab === 'batches') fetchBatches()
     if (subTab === 'exemplos') fetchExamples()
+    if (subTab === 'propostas') fetchProposals()
   }, 60_000)
+
+  async function handleApplyProposal(id) {
+    setError(null)
+    setSuccessMsg(null)
+    setBusyProposalId(id)
+    try {
+      const result = await applyProposal(id)
+      setSuccessMsg(`✓ Proposta aplicada — nova versão do prompt: v${result?.new_version?.versao ?? '?'}`)
+      fetchProposals()
+    } catch (e) {
+      setError(`Falha ao aplicar: ${e.message}`)
+    }
+    setBusyProposalId(null)
+  }
+
+  async function handleRejectProposal(id) {
+    setError(null)
+    setSuccessMsg(null)
+    setBusyProposalId(id)
+    try {
+      await rejectProposal(id)
+      setSuccessMsg('Proposta rejeitada.')
+      fetchProposals()
+    } catch (e) {
+      setError(`Falha ao rejeitar: ${e.message}`)
+    }
+    setBusyProposalId(null)
+  }
 
   async function handleAnalyze() {
     setError(null)
@@ -593,6 +751,7 @@ export default function AprendizadoIA() {
 
   const SUB_TABS = [
     { id: 'conversoes', label: 'Conversões pendentes' },
+    { id: 'propostas', label: `Propostas de regras${proposals.length > 0 ? ` (${proposals.length})` : ''}` },
     { id: 'batches', label: 'Histórico de batches' },
     { id: 'exemplos', label: 'Exemplos ativos' },
   ]
@@ -647,6 +806,16 @@ export default function AprendizadoIA() {
           loading={loadingRecentes}
           analyzing={analyzing}
           detecting={detecting}
+        />
+      )}
+      {subTab === 'propostas' && (
+        <TabPropostas
+          proposals={proposals}
+          loading={loadingProposals}
+          onApply={handleApplyProposal}
+          onReject={handleRejectProposal}
+          onRefresh={fetchProposals}
+          busyId={busyProposalId}
         />
       )}
       {subTab === 'batches' && (

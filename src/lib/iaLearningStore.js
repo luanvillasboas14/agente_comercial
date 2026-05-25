@@ -69,3 +69,18 @@ export async function triggerDetectorNow() {
 export async function loadDetectorStatus() {
   return fetchJson('/api/ia-learning/detector/status')
 }
+
+/** Lista propostas pendentes do aprendizado positivo (filtrado client-side). */
+export async function loadAprendizadoProposals() {
+  const data = await fetchJson('/api/ia-feedback/proposals?status=pendente&limit=100')
+  const rows = Array.isArray(data) ? data : (data.rows || data)
+  return (Array.isArray(rows) ? rows : []).filter((p) => p.origem === 'aprendizado_positivo')
+}
+
+export async function applyProposal(id) {
+  return fetchJson(`/api/ia-feedback/proposals/${id}/accept`, { method: 'POST' })
+}
+
+export async function rejectProposal(id) {
+  return fetchJson(`/api/ia-feedback/proposals/${id}/reject`, { method: 'POST' })
+}
