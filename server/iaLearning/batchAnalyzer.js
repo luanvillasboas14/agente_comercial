@@ -31,7 +31,7 @@ function truncateConversa(mensagens, maxChars = 2000) {
 /**
  * Monta o prompt do sistema para o analyzer.
  */
-function buildAnalyzerPrompt(leadsData, { minSupport, minQuality }) {
+function buildAnalyzerPrompt(leadsData, { minSupport, minQuality, minExamples, maxExamples }) {
   const batchText = leadsData.map((ld, i) => {
     const snap = ld.conversa_snapshot || {}
     const msgs = Array.isArray(snap.mensagens) ? snap.mensagens : []
@@ -43,7 +43,15 @@ function buildAnalyzerPrompt(leadsData, { minSupport, minQuality }) {
     system: `Você é um analista que estuda conversas REAIS entre consultores humanos e leads que CONVERTERAM (compraram o curso).
 Seu objetivo é extrair APRENDIZADO POSITIVO pra melhorar uma IA de atendimento.
 
-Você recebe um BATCH de conversas. Analise TODAS antes de propor.
+Você recebe um BATCH de ${leadsData.length} conversas. Analise TODAS antes de propor.
+
+META DE QUANTIDADE (importante):
+- Você DEVE extrair entre ${minExamples} e ${maxExamples} exemplos no total.
+- Escale com o tamanho do batch: batches maiores → mais exemplos (mais material disponível).
+- Sugestão: ~1 exemplo por cada ${Math.max(5, Math.floor(leadsData.length / Math.max(1, maxExamples)))} conversas, sem ultrapassar ${maxExamples}.
+- Diversifique por categoria (abertura, preço, objeção, curso_específico, fechamento) — não concentre tudo em uma só.
+- Cada exemplo precisa vir de uma conversa DIFERENTE (não pegue 2 exemplos do mesmo lead_id).
+- Se um padrão excelente aparecer várias vezes, prefira propor REGRA (regras_propostas) em vez de duplicar exemplos.
 
 Você deve retornar exatamente este JSON:
 {
@@ -110,6 +118,10 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
   const maxBatch = Math.max(minBatch, Number(env.IA_LEARNING_MAX_BATCH_SIZE || 200))
   const minSupport = Math.max(1, Number(env.IA_LEARNING_MIN_SUPPORT || 5))
   const minQuality = Math.max(1, Number(env.IA_LEARNING_MIN_EXAMPLE_QUALITY || 3))
+  // Quantidade de exemplos esperada — escala com tamanho do batch.
+  // Defaults: piso 2, teto = max(5, batchSize/10). Pode override via env.
+  const minExamplesEnv = Number(env.IA_LEARNING_MIN_EXAMPLES_PER_BATCH || 0)
+  const maxExamplesEnv = Number(env.IA_LEARNING_MAX_EXAMPLES_PER_BATCH || 0)
 
   // 1) Busca pendentes — pede até `maxBatch` (ou o limite manual passado).
   // listPendentes tem hard cap interno de 500, suficiente pra um batch.
@@ -145,7 +157,11 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
 
   try {
     // 4) Monta prompt
-    const { system, user } = buildAnalyzerPrompt(leadsParaBatch, { minSupport, minQuality })
+    // Resolve metas de quantidade de exemplos baseado no tamanho real do batch
+    const minExamples = minExamplesEnv > 0 ? minExamplesEnv : 2
+    const maxExamples = maxExamplesEnv > 0 ? maxExamplesEnv : Math.max(5, Math.ceil(leadsParaBatch.length / 10))
+    const { system, user } = buildAnalyzerPrompt(leadsParaBatch, { minSupport, minQuality, minExamples, maxExamples })
+    console.log(`[IaLearning] analyzer: meta exemplos = entre ${minExamples} e ${maxExamples} (batch=${leadsParaBatch.length})`)
 
     // 5) Chama OpenAI via fetch direto (padrão do projeto, sem SDK)
     const apiKey = env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || ''
