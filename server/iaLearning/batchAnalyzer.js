@@ -104,11 +104,16 @@ function parseAnalyzerResponse(raw) {
  */
 export async function runBatchAnalysis(env, { trigger = 'manual', limit = null } = {}) {
   const minBatch = Math.max(1, Number(env.IA_LEARNING_MIN_BATCH_SIZE || 50))
+  // Teto de segurança pra não estourar contexto do modelo. Pode ser ajustado
+  // via env. Default 200 (≈ o3-mini com folga). Em batches maiores risco de
+  // truncamento aumenta.
+  const maxBatch = Math.max(minBatch, Number(env.IA_LEARNING_MAX_BATCH_SIZE || 200))
   const minSupport = Math.max(1, Number(env.IA_LEARNING_MIN_SUPPORT || 5))
   const minQuality = Math.max(1, Number(env.IA_LEARNING_MIN_EXAMPLE_QUALITY || 3))
 
-  // 1) Busca pendentes
-  const fetchLimit = limit != null ? Number(limit) : minBatch * 2
+  // 1) Busca pendentes — pede até `maxBatch` (ou o limite manual passado).
+  // listPendentes tem hard cap interno de 500, suficiente pra um batch.
+  const fetchLimit = limit != null ? Number(limit) : maxBatch
   const pendentes = await listPendentes(env, fetchLimit)
 
   if (pendentes.length < minBatch) {
@@ -116,8 +121,11 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
     return { ok: false, reason: 'min_not_reached', pendentes: pendentes.length, min: minBatch }
   }
 
-  // 2) Pega os minBatch mais antigos (já vem em order asc pelo store)
-  const leadsParaBatch = pendentes.slice(0, minBatch)
+  // 2) Usa TODAS as conversas disponíveis (até o teto maxBatch).
+  // Order asc do store garante FIFO — conversas mais antigas vão primeiro.
+  const tamanhoBatch = Math.min(pendentes.length, maxBatch)
+  const leadsParaBatch = pendentes.slice(0, tamanhoBatch)
+  console.log(`[IaLearning] analyzer: batch usará ${leadsParaBatch.length} conversas (pendentes=${pendentes.length} min=${minBatch} max=${maxBatch})`)
   const totalMensagens = leadsParaBatch.reduce((acc, l) => acc + (l.total_mensagens || 0), 0)
   const leadsIds = leadsParaBatch.map((l) => l.id)
 
