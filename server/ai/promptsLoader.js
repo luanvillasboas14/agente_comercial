@@ -8,6 +8,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getFeedbackSupabase } from '../iaFeedback/supabaseClient.js'
+import { buildFewShotBlock, refreshExamples } from '../iaLearning/fewShotInjector.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -534,7 +535,27 @@ export async function refreshAgentRulesText(env) {
   }
 }
 
-export function buildSystemMessage(prompts) {
+export function buildSystemMessage(prompts, env) {
   const promptsText = prompts.map((p) => `### ${p.name} (${p.type})\n\n${p.body}`).join('\n\n---\n\n')
-  return promptsText + '\n\n---\n\n' + getAgentRulesText()
+  let finalMessage = promptsText + '\n\n---\n\n' + getAgentRulesText()
+
+  if (env) {
+    const fewShotBlock = buildFewShotBlock(env)
+    if (fewShotBlock) {
+      finalMessage = `${finalMessage}\n\n${fewShotBlock}`
+    }
+  }
+
+  return finalMessage
+}
+
+/**
+ * Atualiza todos os caches de prompt em paralelo:
+ * versão ativa do agent_rules_text e exemplos few-shot.
+ */
+export async function refreshAllPromptCaches(env) {
+  await Promise.all([
+    refreshAgentRulesText(env),
+    refreshExamples(env),
+  ])
 }

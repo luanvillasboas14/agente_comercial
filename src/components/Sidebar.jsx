@@ -1,4 +1,4 @@
-import { Sparkles, LayoutDashboard, FileText, FlaskConical, ListChecks, Settings, Star, BarChart3, Bot, ShieldCheck, Activity, Users } from 'lucide-react'
+import { Sparkles, LayoutDashboard, FileText, FlaskConical, ListChecks, Settings, Star, BarChart3, Bot, ShieldCheck, Activity, Users, Brain } from 'lucide-react'
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { id: 'feedback', label: 'Feedback Comercial', icon: Star },
   { id: 'feedback-dashboard', label: 'Dashboard Feedback', icon: BarChart3 },
   { id: 'feedback-ia', label: 'Feedback IA', icon: ShieldCheck },
+  { id: 'ia-learning', label: 'Aprendizado IA', icon: Brain },
   { id: 'kommo-runs', label: 'Execuções Kommo', icon: Activity },
   { id: 'kommo-atividade', label: 'Atividade Consultores', icon: Users },
 ]

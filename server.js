@@ -55,6 +55,12 @@ import { createProposal, listProposals, getProposalById, markProposalApplied, ma
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
+import { startDetectorScheduler, runOnce as runDetectorOnce } from './server/iaLearning/detectorRunner.js'
+import { runBatchAnalysis } from './server/iaLearning/batchAnalyzer.js'
+import { listRecentes, listPendentes, countPendentes } from './server/iaLearning/leadsConvertidosStore.js'
+import { listBatches, getBatch } from './server/iaLearning/batchesStore.js'
+import { listExamples, activateExample, rejectExample, archiveExample } from './server/iaLearning/examplesStore.js'
+import { refreshExamples } from './server/iaLearning/fewShotInjector.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -309,6 +315,94 @@ app.post('/api/kommo-events/test-fetch', async (req, res) => {
     console.error('[kommo-events/test-fetch]', e.message)
     res.status(500).json({ ok: false, error: e.message })
   }
+})
+
+// ── Aprendizado IA ──
+
+app.get('/api/ia-learning/status', async (_req, res) => {
+  try {
+    const [pendentes, recentes, batches] = await Promise.all([
+      countPendentes(process.env).catch(() => 0),
+      listRecentes(process.env, 10).catch(() => []),
+      listBatches(process.env, 5).catch(() => []),
+    ])
+    const min = Math.max(1, Number(process.env.IA_LEARNING_MIN_BATCH_SIZE || 50))
+    res.json({ pendentes_count: pendentes, min_batch_size: min, can_analyze: pendentes >= min, ultimas_detec: recentes, ultimos_batches: batches })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/convertidos', async (req, res) => {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)))
+    const rows = await listRecentes(process.env, limit)
+    res.json({ rows })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/ia-learning/analyze', async (req, res) => {
+  try {
+    const result = await runBatchAnalysis(process.env, { trigger: 'manual' })
+    res.json(result)
+  } catch (e) {
+    console.error('[ia-learning/analyze]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-learning/detector/run-now', async (_req, res) => {
+  try {
+    runDetectorOnce(process.env, 'manual').catch((e) => console.error('[ia-learning/detector] FAIL:', e.message))
+    res.json({ ok: true, started: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/batches', async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20)))
+    const rows = await listBatches(process.env, limit)
+    res.json({ rows })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/batches/:id', async (req, res) => {
+  try {
+    const row = await getBatch(process.env, req.params.id)
+    if (!row) return res.status(404).json({ error: 'não encontrado' })
+    res.json(row)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/examples', async (req, res) => {
+  try {
+    const status = String(req.query.status || 'ativo')
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)))
+    const rows = await listExamples(process.env, { status, limit })
+    res.json({ rows })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/ia-learning/examples/:id/activate', async (req, res) => {
+  try {
+    await activateExample(process.env, req.params.id)
+    refreshExamples(process.env).catch(() => {})
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/ia-learning/examples/:id/reject', async (req, res) => {
+  try {
+    await rejectExample(process.env, req.params.id)
+    refreshExamples(process.env).catch(() => {})
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/ia-learning/examples/:id/archive', async (req, res) => {
+  try {
+    await archiveExample(process.env, req.params.id)
+    refreshExamples(process.env).catch(() => {})
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 // ── Feedback Job: scheduler + endpoint de status ──
@@ -2372,6 +2466,10 @@ app.listen(PORT, async () => {
 
   startKommoEventsScheduler(process.env)
 
+  try {
+    startDetectorScheduler(process.env)
+  } catch (e) { console.error('[IaLearning] falha ao iniciar detector scheduler:', e.message) }
+
   // Otimizador de Prompt — seed da versão inicial e cache em memória
   await seedInitialVersionIfEmpty(process.env).catch((err) =>
     console.warn('[boot] seedInitialVersionIfEmpty falhou:', err.message),
@@ -2380,6 +2478,10 @@ app.listen(PORT, async () => {
     console.warn('[boot] refreshAgentRulesText falhou:', err.message),
   )
   setInterval(() => refreshAgentRulesText(process.env).catch(() => {}), 60_000)
+
+  // Cache de exemplos few-shot
+  refreshExamples(process.env).catch(() => {})
+  setInterval(() => refreshExamples(process.env).catch(() => {}), 60_000)
 
   // Probe do dispatcher no boot — falha silenciosa é a pior coisa em
   // produção. Se modo=dispatcher e ele não estiver acessível, a IA

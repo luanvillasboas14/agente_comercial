@@ -43,6 +43,7 @@ const DEFAULTS = {
   feedback: 'gpt-4.1-mini',
   ia_feedback: 'gpt-4.1',               // auditor de qualidade da IA (mais preciso)
   prompt_optimizer: 'o3-mini',           // analisador de violações e proposta de mudança de prompt
+  learning_analyzer: 'o3-mini',          // analisador de batches de aprendizado positivo
   vision: 'gpt-4.1-mini',
   transcribe: 'whisper-1',               // gpt-4o-transcribe é mais caro
   embeddings: 'text-embedding-3-small',  // 3-large é 6.5x mais caro
@@ -61,6 +62,7 @@ const ROLE_ENVS = {
   feedback: 'OPENAI_MODEL_FEEDBACK',
   ia_feedback: 'OPENAI_MODEL_IA_FEEDBACK',
   prompt_optimizer: 'OPENAI_MODEL_PROMPT_OPTIMIZER',
+  learning_analyzer: 'OPENAI_MODEL_LEARNING_ANALYZER',
   vision: 'OPENAI_MODEL_VISION',
   transcribe: 'OPENAI_MODEL_TRANSCRIBE',
   embeddings: 'OPENAI_MODEL_EMBEDDINGS',

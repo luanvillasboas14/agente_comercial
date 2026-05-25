@@ -346,9 +346,19 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
             <AlertTriangle size={10} /> Obsoleta
           </span>
         )}
+        {proposal.origem === 'aprendizado_positivo' && (
+          <span style={{ background: 'var(--success, oklch(72% 0.14 155))', color: '#fff', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
+            aprendizado
+          </span>
+        )}
+        {proposal.support_count != null && (
+          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Apoio: {proposal.support_count} conversas</span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--fg-3)', marginLeft: 'auto' }}>{fmt(proposal.created_at)}</span>
         <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.modelo_analisador}</span>
-        <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.total_violacoes} violações</span>
+        {proposal.total_violacoes != null && (
+          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.total_violacoes} violações</span>
+        )}
       </div>
 
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
