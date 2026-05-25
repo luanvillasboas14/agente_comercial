@@ -12,7 +12,12 @@ import { getConsultoresAtivos } from '../kommoEvents/consultoresSource.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
+export async function runDetectorJob(env, { trigger = 'manual', onProgress = null } = {}) {
+  const reportProgress = (patch) => {
+    if (typeof onProgress === 'function') {
+      try { onProgress(patch) } catch { /* noop */ }
+    }
+  }
   const aceiteStatusId = Number(env.KOMMO_ACEITE_STATUS_ID || 48566207)
   const aceitePipelineId = Number(env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
 
@@ -70,6 +75,7 @@ export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
   }
 
   console.log(`[IaLearning] detector: ${eventos.length} eventos de aceite encontrados nos últimos 7 dias`)
+  reportProgress({ total: eventos.length, processados: 0, novos: 0, skipJaDetectado: 0, errosCaptura: 0 })
 
   // 2) Busca mapa de consultores para resolução de nome
   let consultoresMap = new Map()
@@ -142,6 +148,8 @@ export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
         errosCaptura += 1
       }
     }
+
+    reportProgress({ total: eventos.length, processados: novos + skipJaDetectado + errosCaptura, novos, skipJaDetectado, errosCaptura })
 
     // Delay entre leads para não bombardear Kommo
     await sleep(1200)

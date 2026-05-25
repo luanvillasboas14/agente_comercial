@@ -510,8 +510,15 @@ export default function AprendizadoIA() {
         const elapsedSec = st.startedAt
           ? Math.round((Date.now() - new Date(st.startedAt).getTime()) / 1000)
           : 0
-        setSuccessMsg(`Detector rodando há ${elapsedSec}s... (cada lead leva ~1.2s + tempo de captura)`)
-        // Atualiza lista de pendentes/recentes em background pra ver progresso
+        const p = st.progress
+        if (p && p.total != null) {
+          const pct = p.total > 0 ? Math.round((p.processados / p.total) * 100) : 0
+          setSuccessMsg(
+            `Processando ${p.processados}/${p.total} (${pct}%) · ${p.novos} novos · ${p.skipJaDetectado} já detectados · ${p.errosCaptura} erros · ${elapsedSec}s`,
+          )
+        } else {
+          setSuccessMsg(`Detector iniciando... (${elapsedSec}s — buscando eventos de aceite)`)
+        }
         fetchStatus()
         fetchRecentes()
       } else if (st.lastResult && new Date(st.lastResult.finishedAt).getTime() >= triggerTs) {

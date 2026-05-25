@@ -15,6 +15,7 @@ let scheduledEnv = null
 let lastTriggeredDayKey = null
 let lastHeartbeatHourKey = null
 let lastResult = null // { finishedAt, trigger, ok, novos, skipJaDetectado, errosCaptura, totalEventos, durationMs, error? }
+let currentProgress = null // { total, processados, novos, skipJaDetectado, errosCaptura }
 
 export function getDetectorRunnerStatus() {
   return {
@@ -22,6 +23,7 @@ export function getDetectorRunnerStatus() {
     pendingTrigger,
     startedAt: currentRunStartedAt ? currentRunStartedAt.toISOString() : null,
     trigger: currentTrigger,
+    progress: jobRunning ? currentProgress : null,
     lastResult,
   }
 }
@@ -54,6 +56,7 @@ export async function runOnce(env, trigger = 'manual') {
     jobRunning = false
     currentRunStartedAt = null
     currentTrigger = null
+    currentProgress = null
     if (pendingTrigger) {
       pendingTrigger = false
       setImmediate(() => runOnce(env, 'queued_after_watchdog'))
@@ -63,8 +66,12 @@ export async function runOnce(env, trigger = 'manual') {
   const startMs = Date.now()
   let result = null
   let runErr = null
+  currentProgress = { total: null, processados: 0, novos: 0, skipJaDetectado: 0, errosCaptura: 0 }
   try {
-    result = await runDetectorJob(env, { trigger })
+    result = await runDetectorJob(env, {
+      trigger,
+      onProgress: (patch) => { currentProgress = { ...currentProgress, ...patch } },
+    })
   } catch (e) {
     runErr = e
     console.error('[IaLearning] Detector execução falhou:', e.message)
@@ -85,6 +92,7 @@ export async function runOnce(env, trigger = 'manual') {
       jobRunning = false
       currentRunStartedAt = null
       currentTrigger = null
+      currentProgress = null
       if (pendingTrigger) {
         pendingTrigger = false
         console.log('[IaLearning] Detector: disparando execução enfileirada agora.')
