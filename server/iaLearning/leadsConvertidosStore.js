@@ -80,3 +80,42 @@ export async function marcarErroCaptura(env, leadId, error) {
     { capture_error: String(error).slice(0, 500) },
   )
 }
+
+/**
+ * Deleta leads que falharam na captura e ainda não foram processados em batch.
+ * Permite que o detector os re-detecte numa próxima rodada (útil quando a
+ * estratégia de captura mudou).
+ */
+export async function deleteLeadsComErroNaoProcessados(env) {
+  const db = getDb(env)
+  // PostgREST: DELETE com filtros
+  const rows = await db.select(
+    'ia_leads_convertidos',
+    `select=id&capture_error=not.is.null&processed_at=is.null&limit=10000`,
+  )
+  const ids = Array.isArray(rows) ? rows.map((r) => `"${r.id}"`) : []
+  if (ids.length === 0) return 0
+  // PostgREST DELETE
+  const sb = getDb(env)
+  // makeMainSupabase-like helper precisa de DELETE. Implemento via filtro
+  // genérico no helper. Como o helper só tem select/insert/update,
+  // vou fazer fetch direto.
+  const url = (env.SUPABASE_URL_FEEDBACK || '').replace(/\/$/, '')
+  const key = env.SUPABASE_KEY_FEEDBACK || ''
+  if (!url || !key) return 0
+  const res = await fetch(`${url}/rest/v1/ia_leads_convertidos?id=in.(${ids.join(',')})`, {
+    method: 'DELETE',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Prefer: 'return=minimal',
+    },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`[IaLearning/store] delete falhou: ${res.status} ${text.slice(0, 200)}`)
+  }
+  // sb apenas pra evitar warn de variável não utilizada
+  void sb
+  return ids.length
+}

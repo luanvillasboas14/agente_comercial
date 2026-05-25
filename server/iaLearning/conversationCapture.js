@@ -1,130 +1,69 @@
 /**
  * Captura a conversa de um lead convertido.
+ *
+ * Fonte PRIMÁRIA: tabela `mensagens_atendimento_comercial` no Supabase FEEDBACK
+ * (a mesma usada pelo `feedbackJob`). Tem todas as colunas necessárias:
+ * lead_id, contact_id, direction, message_text, sent_at, sender_type, consultor_responsavel.
+ *
  * Estratégia:
- *   1. Lista talks via tryListTalksForLead (Kommo REST v4)
- *   2. Para cada talk, tenta GET /api/v4/talks/{id}/messages?limit=250&order[id]=asc
- *   3. Complementa com mensagens_atendimento_comercial (Supabase principal)
- *   4. Monta e retorna snapshot final normalizado
+ *   1) SELECT por lead_id=eq.X
+ *   2) Se vazio, busca contact_ids do lead no Kommo e tenta por contact_id=in.(...)
+ *   3) Normaliza pro formato { ts, remetente, texto }
+ *
+ * NÃO usamos mais a Chats API do Kommo — o endpoint REST público não retorna
+ * o conteúdo das mensagens. As mensagens já estão no banco de Feedback.
  */
 
-import { tryListTalksForLead } from '../kommoClient.js'
-import { makeMainSupabase } from './mainSupabaseClient.js'
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+import { getFeedbackSupabase } from '../iaFeedback/supabaseClient.js'
+import { getLeadContactIds } from '../kommoClient.js'
 
 /**
- * Tenta buscar mensagens de um talk via REST Kommo.
- * Endpoint primário: GET /api/v4/talks/{talkId}/messages
- * Retorna array de mensagens normalizadas ou [] se indisponível.
+ * Normaliza uma linha de mensagens_atendimento_comercial pro formato comum.
  */
-async function listTalkMessages(env, talkId) {
-  const baseUrl = (env.KOMMO_BASE_URL || '').replace(/\/$/, '')
-  const token = env.KOMMO_ACCESS_TOKEN || ''
-  if (!baseUrl || !token) return []
-
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
-
-  // Tenta endpoint de mensagens do talk
-  const endpoints = [
-    `${baseUrl}/api/v4/talks/${talkId}/messages?limit=250&order[id]=asc`,
-    `${baseUrl}/api/v4/talks/${talkId}`,
-  ]
-
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, { headers })
-      if (!res.ok) {
-        console.warn(`[IaLearning/capture] listTalkMessages talk=${talkId} url=${url} status=${res.status}`)
-        continue
-      }
-      const data = await res.json()
-
-      // Endpoint /messages retorna {_embedded: {messages: [...]}} ou similar
-      const msgs = data?._embedded?.messages
-        || data?._embedded?.talk_messages
-        || data?.messages
-        || []
-      if (Array.isArray(msgs) && msgs.length > 0) {
-        return normalizeKommoMessages(msgs)
-      }
-
-      // Se retornou só o talk sem mensagens, sinaliza que o endpoint não tem mensagens
-      console.warn(`[IaLearning/capture] listTalkMessages talk=${talkId}: sem mensagens em ${url}`)
-    } catch (e) {
-      console.warn(`[IaLearning/capture] listTalkMessages talk=${talkId} err: ${e.message}`)
-    }
-  }
-
-  return []
+function normalizeRow(row) {
+  const ts = row.sent_at || row.created_at || null
+  // direction: 'in' = veio do lead, 'out' = veio do consultor/sistema
+  const dir = String(row.direction || '').toLowerCase()
+  const remetente = (dir === 'in' || dir === 'incoming' || row.sender_type === 'contact' || row.sender_type === 'lead')
+    ? 'lead'
+    : 'consultor'
+  const texto = String(row.message_text || row.content || '').trim()
+  return { ts, remetente, texto }
 }
 
-/**
- * Normaliza mensagens brutas do Kommo para o formato { ts, remetente, texto }.
- */
-function normalizeKommoMessages(rawMsgs) {
-  const out = []
-  for (const m of rawMsgs) {
-    const ts = m.created_at
-      ? new Date(Number(m.created_at) * 1000).toISOString()
-      : (m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : null)
-    const remetente = m.author?.type === 'bot' || m.direction === 'outgoing' || m.from === 'system'
-      ? 'consultor'
-      : 'lead'
-    const texto = m.content?.text || m.text || m.body || ''
-    if (texto && texto.trim()) {
-      out.push({ ts, remetente, texto: texto.trim() })
-    }
-  }
-  return out
-}
-
-/**
- * Busca mensagens do Supabase principal (mensagens_atendimento_comercial).
- */
-async function fetchMensagensAtendimento(env, leadId) {
-  const db = makeMainSupabase(env)
-  if (!db) return []
+async function fetchByLeadId(sb, leadId) {
   try {
-    const rows = await db.select(
+    const rows = await sb.select(
       'mensagens_atendimento_comercial',
-      `select=*&lead_id=eq.${Number(leadId)}&order=created_at.asc&limit=500`,
+      `select=sent_at,created_at,direction,sender_type,sender_name,consultor_responsavel,message_text` +
+      `&lead_id=eq.${Number(leadId)}` +
+      `&order=sent_at.asc.nullslast,created_at.asc.nullslast` +
+      `&limit=2000`,
     )
-    if (!Array.isArray(rows) || rows.length === 0) return []
-    return rows.map((r) => ({
-      ts: r.created_at || null,
-      remetente: r.role === 'assistant' || r.direction === 'outgoing' ? 'consultor' : 'lead',
-      texto: (r.content || r.message || r.text || '').trim(),
-    })).filter((m) => m.texto)
+    return Array.isArray(rows) ? rows : []
   } catch (e) {
-    console.warn(`[IaLearning/capture] fetchMensagensAtendimento lead=${leadId} err: ${e.message}`)
+    console.warn(`[IaLearning/capture] fetchByLeadId lead=${leadId} err: ${e.message}`)
     return []
   }
 }
 
-/**
- * Mescla e deduplica mensagens de duas fontes, ordenando por ts.
- */
-function mergeMensagens(kommoMsgs, supabaseMsgs) {
-  const all = [...kommoMsgs, ...supabaseMsgs]
-  // Dedup por (ts, remetente, primeiros 60 chars do texto)
-  const seen = new Set()
-  const deduped = []
-  for (const m of all) {
-    const key = `${m.ts}|${m.remetente}|${String(m.texto).slice(0, 60)}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      deduped.push(m)
-    }
+async function fetchByContactIds(sb, contactIds) {
+  if (!Array.isArray(contactIds) || contactIds.length === 0) return []
+  const idsCsv = contactIds.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0).join(',')
+  if (!idsCsv) return []
+  try {
+    const rows = await sb.select(
+      'mensagens_atendimento_comercial',
+      `select=sent_at,created_at,direction,sender_type,sender_name,consultor_responsavel,message_text` +
+      `&contact_id=in.(${idsCsv})` +
+      `&order=sent_at.asc.nullslast,created_at.asc.nullslast` +
+      `&limit=2000`,
+    )
+    return Array.isArray(rows) ? rows : []
+  } catch (e) {
+    console.warn(`[IaLearning/capture] fetchByContactIds contacts=${idsCsv} err: ${e.message}`)
+    return []
   }
-  deduped.sort((a, b) => {
-    if (!a.ts) return 1
-    if (!b.ts) return -1
-    return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0
-  })
-  return deduped
 }
 
 /**
@@ -132,69 +71,53 @@ function mergeMensagens(kommoMsgs, supabaseMsgs) {
  *
  * @param {Record<string,string>} env
  * @param {{ leadId: number, consultorId?: number, consultorNome?: string }} opts
- * @returns {{ snapshot: object, fonte: string, totalMensagens: number, error?: string }}
+ * @returns {{ snapshot: object, fonte: string|null, totalMensagens: number, error?: string }}
  */
 export async function captureConversation(env, { leadId, consultorId, consultorNome }) {
   const lid = Number(leadId)
-  let kommoMsgs = []
-  let supabaseMsgs = []
-  let captureError = null
-
-  // 1) Tenta talks + mensagens via Kommo REST
-  try {
-    const talksResult = await tryListTalksForLead(env, lid)
-    const talks = talksResult.ok ? (talksResult.talks || []) : []
-
-    if (talks.length === 0) {
-      console.warn(`[IaLearning/capture] lead=${lid}: nenhum talk encontrado`)
-      captureError = 'no_talks_found'
+  const sb = getFeedbackSupabase(env)
+  if (!sb) {
+    return {
+      snapshot: { lead_id: lid, mensagens: [] },
+      fonte: null,
+      totalMensagens: 0,
+      error: 'no_supabase_feedback',
     }
-
-    for (const talk of talks.slice(0, 5)) {
-      const talkId = talk?.id ?? talk?.talk_id
-      if (!talkId) continue
-      const msgs = await listTalkMessages(env, talkId)
-      kommoMsgs.push(...msgs)
-      await sleep(500)
-    }
-
-    if (talks.length > 0 && kommoMsgs.length === 0) {
-      console.warn(`[IaLearning/capture] lead=${lid}: talks encontrados mas sem mensagens — chats_api_unavailable`)
-      captureError = 'chats_api_unavailable'
-    }
-  } catch (e) {
-    console.warn(`[IaLearning/capture] lead=${lid} talks err: ${e.message}`)
-    captureError = captureError || `talks_error: ${e.message.slice(0, 100)}`
   }
 
-  // 2) Complementa com mensagens_atendimento_comercial
-  try {
-    supabaseMsgs = await fetchMensagensAtendimento(env, lid)
-  } catch (e) {
-    console.warn(`[IaLearning/capture] lead=${lid} supabase msgs err: ${e.message}`)
+  let rows = []
+  let fonte = null
+
+  // 1) tenta por lead_id
+  rows = await fetchByLeadId(sb, lid)
+  if (rows.length > 0) {
+    fonte = 'mensagens_por_lead'
+  } else {
+    // 2) fallback: pega contact_ids via Kommo e tenta de novo
+    try {
+      const contactIds = await getLeadContactIds(env, lid)
+      if (contactIds.length > 0) {
+        rows = await fetchByContactIds(sb, contactIds)
+        if (rows.length > 0) {
+          fonte = 'mensagens_por_contact'
+        }
+      }
+    } catch (e) {
+      console.warn(`[IaLearning/capture] fallback contact_id lead=${lid} err: ${e.message}`)
+    }
   }
 
-  // 3) Mescla
-  const merged = mergeMensagens(kommoMsgs, supabaseMsgs)
+  const mensagens = rows.map(normalizeRow).filter((m) => m.texto)
 
-  // 4) Determina fonte
-  let fonte = 'kommo_chats'
-  if (kommoMsgs.length > 0 && supabaseMsgs.length > 0) {
-    fonte = 'hibrido'
-  } else if (kommoMsgs.length === 0 && supabaseMsgs.length > 0) {
-    fonte = 'mensagens_atendimento_comercial'
-    captureError = null // fonte alternativa funcionou
-  } else if (kommoMsgs.length === 0 && supabaseMsgs.length === 0) {
-    captureError = captureError || 'sem_mensagens'
-  }
-
-  // 5) Calcula duração
+  // duração
   let duracaoHoras = null
-  const timestamps = merged.map((m) => m.ts).filter(Boolean)
-  if (timestamps.length >= 2) {
-    const first = new Date(timestamps[0]).getTime()
-    const last = new Date(timestamps[timestamps.length - 1]).getTime()
-    duracaoHoras = Math.round(((last - first) / 3_600_000) * 10) / 10
+  const tsList = mensagens.map((m) => m.ts).filter(Boolean)
+  if (tsList.length >= 2) {
+    const first = new Date(tsList[0]).getTime()
+    const last = new Date(tsList[tsList.length - 1]).getTime()
+    if (Number.isFinite(first) && Number.isFinite(last)) {
+      duracaoHoras = Math.round(((last - first) / 3_600_000) * 10) / 10
+    }
   }
 
   const snapshot = {
@@ -202,19 +125,21 @@ export async function captureConversation(env, { leadId, consultorId, consultorN
     consultor_id: consultorId ?? null,
     consultor_nome: consultorNome ?? null,
     fonte,
-    total_mensagens: merged.length,
+    total_mensagens: mensagens.length,
     duracao_horas: duracaoHoras,
-    mensagens: merged,
+    mensagens,
   }
 
+  const error = mensagens.length === 0 ? 'sem_mensagens' : null
+
   console.log(
-    `[IaLearning/capture] lead=${lid} fonte=${fonte} msgs_kommo=${kommoMsgs.length} msgs_supa=${supabaseMsgs.length} total=${merged.length}${captureError ? ` err=${captureError}` : ''}`,
+    `[IaLearning/capture] lead=${lid} fonte=${fonte || 'nenhuma'} total=${mensagens.length}${error ? ` err=${error}` : ''}`,
   )
 
   return {
     snapshot,
     fonte,
-    totalMensagens: merged.length,
-    ...(captureError ? { error: captureError } : {}),
+    totalMensagens: mensagens.length,
+    ...(error ? { error } : {}),
   }
 }

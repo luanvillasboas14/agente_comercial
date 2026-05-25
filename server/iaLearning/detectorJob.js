@@ -6,7 +6,7 @@
  */
 
 import { makeMainSupabase } from './mainSupabaseClient.js'
-import { leadJaDetectado, insertLeadConvertido } from './leadsConvertidosStore.js'
+import { leadJaDetectado, insertLeadConvertido, deleteLeadsComErroNaoProcessados } from './leadsConvertidosStore.js'
 import { captureConversation } from './conversationCapture.js'
 import { getConsultoresAtivos } from '../kommoEvents/consultoresSource.js'
 
@@ -17,6 +17,15 @@ export async function runDetectorJob(env, { trigger = 'manual' } = {}) {
   const aceitePipelineId = Number(env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
 
   console.log(`[IaLearning] detector iniciando trigger=${trigger} aceiteStatus=${aceiteStatusId} aceitePipeline=${aceitePipelineId}`)
+
+  // Limpa registros com erro de captura não-processados — permite re-tentar
+  // com a estratégia atual de captura.
+  try {
+    const removed = await deleteLeadsComErroNaoProcessados(env)
+    if (removed > 0) console.log(`[IaLearning] detector: ${removed} leads com erro_captura limpos pra re-tentativa`)
+  } catch (e) {
+    console.warn(`[IaLearning] detector: falha ao limpar erros antigos: ${e.message}`)
+  }
 
   const db = makeMainSupabase(env)
   if (!db) {
