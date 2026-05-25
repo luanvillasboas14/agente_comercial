@@ -3,7 +3,6 @@
  * Envia conversas ao o3-mini para extrair regras e exemplos de bom atendimento.
  */
 
-import OpenAI from 'openai'
 import { listPendentes, marcarProcessados } from './leadsConvertidosStore.js'
 import { createBatch, finishBatch } from './batchesStore.js'
 import { createExample } from './examplesStore.js'
@@ -140,32 +139,59 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
     // 4) Monta prompt
     const { system, user } = buildAnalyzerPrompt(leadsParaBatch, { minSupport, minQuality })
 
-    // 5) Chama OpenAI
-    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY })
+    // 5) Chama OpenAI via fetch direto (padrão do projeto, sem SDK)
+    const apiKey = env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || ''
+    if (!apiKey) throw new Error('[IaLearning/analyzer] OPENAI_API_KEY não configurada')
+
+    const timeoutMs = Number(env.IA_LEARNING_OPENAI_TIMEOUT_MS || 300_000)
+
+    async function callOpenAI(body) {
+      const controller = new AbortController()
+      const to = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '')
+          const err = new Error(`HTTP ${res.status}: ${errText.slice(0, 400) || res.statusText}`)
+          err.status = res.status
+          err.body = errText
+          throw err
+        }
+        const data = await res.json()
+        return String(data?.choices?.[0]?.message?.content || '').trim()
+      } finally {
+        clearTimeout(to)
+      }
+    }
+
+    const baseMessages = [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ]
 
     let responseText
     try {
-      const completion = await openai.chat.completions.create({
+      responseText = await callOpenAI({
         model: modelo,
         response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
+        messages: baseMessages,
       })
-      responseText = completion.choices?.[0]?.message?.content || ''
     } catch (openaiErr) {
-      // Se modelo não suporta json_object (ex: o3-mini em algumas configs), tenta sem
-      if (String(openaiErr.message).includes('response_format') || String(openaiErr.message).includes('json_object')) {
+      // Se modelo não suporta json_object, tenta sem
+      const msg = String(openaiErr.message || '')
+      const body = String(openaiErr.body || '')
+      const notSupported = /response_format|json_object/i.test(msg) || /response_format|json_object/i.test(body)
+      if (notSupported) {
         console.warn(`[IaLearning] analyzer: json_object não suportado pelo modelo ${modelo}, tentando sem`)
-        const completion = await openai.chat.completions.create({
-          model: modelo,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        })
-        responseText = completion.choices?.[0]?.message?.content || ''
+        responseText = await callOpenAI({ model: modelo, messages: baseMessages })
       } else {
         throw openaiErr
       }
