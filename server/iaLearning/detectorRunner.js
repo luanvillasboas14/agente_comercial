@@ -9,10 +9,22 @@ import { runDetectorJob } from './detectorJob.js'
 let jobRunning = false
 let pendingTrigger = false
 let currentRunStartedAt = null
+let currentTrigger = null
 let schedulerStarted = false
 let scheduledEnv = null
 let lastTriggeredDayKey = null
 let lastHeartbeatHourKey = null
+let lastResult = null // { finishedAt, trigger, ok, novos, skipJaDetectado, errosCaptura, totalEventos, durationMs, error? }
+
+export function getDetectorRunnerStatus() {
+  return {
+    running: jobRunning,
+    pendingTrigger,
+    startedAt: currentRunStartedAt ? currentRunStartedAt.toISOString() : null,
+    trigger: currentTrigger,
+    lastResult,
+  }
+}
 
 export async function runOnce(env, trigger = 'manual') {
   if (jobRunning) {
@@ -22,6 +34,7 @@ export async function runOnce(env, trigger = 'manual') {
   }
   jobRunning = true
   currentRunStartedAt = new Date()
+  currentTrigger = trigger
 
   const watchdogMin = 30
   let watchdogFired = false
@@ -31,23 +44,47 @@ export async function runOnce(env, trigger = 'manual') {
       `[IaLearning] ⚠ WATCHDOG: detector trigger=${trigger} excedeu ${watchdogMin}min sem retornar. ` +
       `Liberando lock local.`,
     )
+    lastResult = {
+      finishedAt: new Date().toISOString(),
+      trigger,
+      ok: false,
+      error: `watchdog_${watchdogMin}min`,
+      durationMs: watchdogMin * 60 * 1000,
+    }
     jobRunning = false
     currentRunStartedAt = null
+    currentTrigger = null
     if (pendingTrigger) {
       pendingTrigger = false
       setImmediate(() => runOnce(env, 'queued_after_watchdog'))
     }
   }, watchdogMin * 60 * 1000)
 
+  const startMs = Date.now()
+  let result = null
+  let runErr = null
   try {
-    await runDetectorJob(env, { trigger })
+    result = await runDetectorJob(env, { trigger })
   } catch (e) {
+    runErr = e
     console.error('[IaLearning] Detector execução falhou:', e.message)
   } finally {
     clearTimeout(watchdogTimer)
     if (!watchdogFired) {
+      lastResult = {
+        finishedAt: new Date().toISOString(),
+        trigger,
+        ok: !runErr && (result?.ok !== false),
+        novos: result?.novos ?? 0,
+        skipJaDetectado: result?.skipJaDetectado ?? 0,
+        errosCaptura: result?.errosCaptura ?? 0,
+        totalEventos: result?.totalEventos ?? 0,
+        durationMs: Date.now() - startMs,
+        ...(runErr ? { error: runErr.message } : (result?.reason ? { error: result.reason } : {})),
+      }
       jobRunning = false
       currentRunStartedAt = null
+      currentTrigger = null
       if (pendingTrigger) {
         pendingTrigger = false
         console.log('[IaLearning] Detector: disparando execução enfileirada agora.')

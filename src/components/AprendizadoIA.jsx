@@ -9,6 +9,7 @@ import {
   rejectExample,
   archiveExample,
   triggerDetectorNow,
+  loadDetectorStatus,
 } from '../lib/iaLearningStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -478,10 +479,59 @@ export default function AprendizadoIA() {
     setDetecting(true)
     try {
       await triggerDetectorNow()
-      setSuccessMsg('Detector iniciado em background. Aguarde alguns minutos e recarregue.')
+      setSuccessMsg('Detector iniciado. Acompanhando progresso...')
+      pollDetectorUntilDone()
     } catch (e) {
       setError(e.message)
+      setDetecting(false)
     }
+  }
+
+  // Poll do status do detector enquanto estiver rodando.
+  // Para quando: running=false e lastResult.finishedAt > momento do disparo.
+  async function pollDetectorUntilDone() {
+    const triggerTs = Date.now()
+    const startPollDelay = 1500
+    const pollInterval = 3000
+    const maxWaitMs = 30 * 60 * 1000 // 30 min
+    const startedAt = Date.now()
+    await new Promise((r) => setTimeout(r, startPollDelay))
+
+    while (Date.now() - startedAt < maxWaitMs) {
+      let st
+      try {
+        st = await loadDetectorStatus()
+      } catch {
+        await new Promise((r) => setTimeout(r, pollInterval))
+        continue
+      }
+
+      if (st.running) {
+        const elapsedSec = st.startedAt
+          ? Math.round((Date.now() - new Date(st.startedAt).getTime()) / 1000)
+          : 0
+        setSuccessMsg(`Detector rodando há ${elapsedSec}s... (cada lead leva ~1.2s + tempo de captura)`)
+        // Atualiza lista de pendentes/recentes em background pra ver progresso
+        fetchStatus()
+        fetchRecentes()
+      } else if (st.lastResult && new Date(st.lastResult.finishedAt).getTime() >= triggerTs) {
+        const r = st.lastResult
+        const dur = Math.round((r.durationMs || 0) / 1000)
+        if (r.ok) {
+          setSuccessMsg(
+            `✓ Detecção concluída em ${dur}s · ${r.novos} novos · ${r.skipJaDetectado} já detectados · ${r.errosCaptura} erros de captura (${r.totalEventos} eventos avaliados)`,
+          )
+        } else {
+          setError(`Detecção falhou: ${r.error || 'erro desconhecido'} (após ${dur}s)`)
+        }
+        fetchStatus()
+        fetchRecentes()
+        setDetecting(false)
+        return
+      }
+      await new Promise((r) => setTimeout(r, pollInterval))
+    }
+    setError('Timeout: detector excedeu 30min sem retornar status finalizado.')
     setDetecting(false)
   }
 

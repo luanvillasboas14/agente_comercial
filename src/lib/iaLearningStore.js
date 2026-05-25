@@ -65,3 +65,9 @@ export async function triggerDetectorNow() {
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
   return data
 }
+
+export async function loadDetectorStatus() {
+  const res = await fetch('/api/ia-learning/detector/status')
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}

@@ -55,7 +55,7 @@ import { createProposal, listProposals, getProposalById, markProposalApplied, ma
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
 import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
-import { startDetectorScheduler, runOnce as runDetectorOnce } from './server/iaLearning/detectorRunner.js'
+import { startDetectorScheduler, runOnce as runDetectorOnce, getDetectorRunnerStatus } from './server/iaLearning/detectorRunner.js'
 import { runBatchAnalysis } from './server/iaLearning/batchAnalyzer.js'
 import { listRecentes, listPendentes, countPendentes } from './server/iaLearning/leadsConvertidosStore.js'
 import { listBatches, getBatch } from './server/iaLearning/batchesStore.js'
@@ -353,6 +353,12 @@ app.post('/api/ia-learning/detector/run-now', async (_req, res) => {
   try {
     runDetectorOnce(process.env, 'manual').catch((e) => console.error('[ia-learning/detector] FAIL:', e.message))
     res.json({ ok: true, started: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/detector/status', (_req, res) => {
+  try {
+    res.json(getDetectorRunnerStatus())
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
