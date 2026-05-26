@@ -370,14 +370,21 @@ app.get('/api/ia-learning/detector-diagnostic', async (_req, res) => {
     const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
     const ontemMidnightIso = new Date(new Date().setUTCHours(0,0,0,0) - 24 * 3600 * 1000).toISOString()
 
-    // 1) Total lead_status_changed em 7 dias
-    const all7d = await db.select(
-      'kommo_consultor_eventos',
-      `select=entity_id,created_at_kommo,raw&event_type=eq.lead_status_changed` +
-      `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
-      `&order=created_at_kommo.desc&limit=5000`,
-    )
-    const arr = Array.isArray(all7d) ? all7d : []
+    // 1) Total lead_status_changed em 7 dias — pagina pra ultrapassar limite 1000
+    const arr = []
+    const PAGE = 1000
+    for (let p = 0; p < 20; p++) {
+      const offset = p * PAGE
+      const rows = await db.select(
+        'kommo_consultor_eventos',
+        `select=entity_id,created_at_kommo,raw&event_type=eq.lead_status_changed` +
+        `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+        `&order=created_at_kommo.desc&limit=${PAGE}&offset=${offset}`,
+      )
+      const arrRows = Array.isArray(rows) ? rows : []
+      arr.push(...arrRows)
+      if (arrRows.length < PAGE) break
+    }
 
     // 2) Match local em diferentes estruturas possíveis
     let matchValueAfterArr0 = 0 // value_after[0].lead_status
@@ -442,16 +449,23 @@ app.get('/api/ia-learning/detector-diagnostic', async (_req, res) => {
       leadsAmostraNovos = Array.from(leadsUnicos).filter((id) => !setDet.has(id)).slice(0, 10)
     }
 
-    // 4) Contagem só de ontem (UTC) — aceites do dia
+    // 4) Contagem só de ontem (UTC) — por status_id, mostra pra onde os leads foram
     const ontem = arr.filter((r) => r.created_at_kommo >= ontemMidnightIso)
     let ontemMatch = 0
+    const statusIdsOntem = {}
     for (const r of ontem) {
       const va = r.raw?.value_after
       if (Array.isArray(va) && va[0]?.lead_status) {
         const ls = va[0].lead_status
+        const key = `${ls.id}|${ls.pipeline_id}`
+        statusIdsOntem[key] = (statusIdsOntem[key] || 0) + 1
         if (Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId) ontemMatch++
       }
     }
+    const topStatusOntem = Object.entries(statusIdsOntem)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([k, c]) => ({ status_pipeline: k, count: c }))
 
     res.json({
       config: { aceiteStatusId, aceitePipelineId, sevenDaysAgoIso, ontemMidnightIso },
@@ -465,6 +479,7 @@ app.get('/api/ia-learning/detector-diagnostic', async (_req, res) => {
       novos_estimados: leadsUnicos.size - jaDetectados,
       ontem_lead_status_changed: ontem.length,
       ontem_match_aceite: ontemMatch,
+      ontem_top_status_pipeline: topStatusOntem,
       por_dia_lead_status_changed: porDia,
       amostra_match_arr0: exemplos.match_arr0,
       amostra_outro_status: exemplos.outro,

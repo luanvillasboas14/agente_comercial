@@ -53,21 +53,33 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
   }
 
   try {
-    // Caminho 1 (rápido): filtra direto no PostgREST via contains JSONB.
+    // Caminho 1 (rápido): filtra direto no PostgREST via contains JSONB e PAGINA.
+    // Necessário paginar: a janela de 7 dias pode ter >1000 eventos e o
+    // PostgREST aplica MAX-ROWS no Supabase (geralmente 1000).
     const containsObj = {
       value_after: [{ lead_status: { id: aceiteStatusId, pipeline_id: aceitePipelineId } }],
     }
     const containsCs = encodeURIComponent(JSON.stringify(containsObj))
-    const rows = await db.select(
-      'kommo_consultor_eventos',
-      `select=entity_id,created_at_kommo,created_by,raw` +
-      `&event_type=eq.lead_status_changed` +
-      `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
-      `&raw=cs.${containsCs}` +
-      `&order=created_at_kommo.desc` +
-      `&limit=1000`,
-    )
-    eventos = (Array.isArray(rows) ? rows : []).filter(matchesAceite)
+    const PAGE = 1000
+    const MAX_PAGES = 10 // teto: 10k eventos de aceite em 7 dias é folgado
+    const acumulados = []
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const offset = p * PAGE
+      const rows = await db.select(
+        'kommo_consultor_eventos',
+        `select=entity_id,created_at_kommo,created_by,raw` +
+        `&event_type=eq.lead_status_changed` +
+        `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+        `&raw=cs.${containsCs}` +
+        `&order=created_at_kommo.desc` +
+        `&limit=${PAGE}&offset=${offset}`,
+      )
+      const arr = Array.isArray(rows) ? rows : []
+      acumulados.push(...arr)
+      if (arr.length < PAGE) break
+    }
+    eventos = acumulados.filter(matchesAceite)
+    console.log(`[IaLearning] detector: query rápida pegou ${acumulados.length} (após filtro local: ${eventos.length})`)
   } catch (e) {
     console.warn(`[IaLearning] detector: query rápida falhou (${e.message}). Tentando fallback paginado sem filtro JSONB...`)
     try {
