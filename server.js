@@ -357,6 +357,125 @@ app.get('/api/ia-learning/analyze/status', (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Diagnóstico do DETECTOR: investiga por que poucos aceites novos foram encontrados.
+// Conta eventos por dia, valida estrutura do raw, mostra amostras.
+app.get('/api/ia-learning/detector-diagnostic', async (_req, res) => {
+  try {
+    const { makeMainSupabase } = await import('./server/iaLearning/mainSupabaseClient.js')
+    const db = makeMainSupabase(process.env)
+    if (!db) return res.status(500).json({ error: 'SUPABASE main não configurado' })
+
+    const aceiteStatusId = Number(process.env.KOMMO_ACEITE_STATUS_ID || 48566207)
+    const aceitePipelineId = Number(process.env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
+    const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    const ontemMidnightIso = new Date(new Date().setUTCHours(0,0,0,0) - 24 * 3600 * 1000).toISOString()
+
+    // 1) Total lead_status_changed em 7 dias
+    const all7d = await db.select(
+      'kommo_consultor_eventos',
+      `select=entity_id,created_at_kommo,raw&event_type=eq.lead_status_changed` +
+      `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+      `&order=created_at_kommo.desc&limit=5000`,
+    )
+    const arr = Array.isArray(all7d) ? all7d : []
+
+    // 2) Match local em diferentes estruturas possíveis
+    let matchValueAfterArr0 = 0 // value_after[0].lead_status
+    let matchValueAfterObj = 0  // value_after.lead_status (sem array)
+    let matchEventData = 0      // event_data.value_after[...]
+    let outroStatus = 0
+    const exemplos = { match_arr0: [], outro: [] }
+    const leadsUnicos = new Set()
+    const porDia = {}
+
+    for (const r of arr) {
+      const day = (r.created_at_kommo || '').slice(0, 10)
+      porDia[day] = (porDia[day] || 0) + 1
+
+      const raw = r.raw || {}
+      const va = raw.value_after
+      let matched = false
+      if (Array.isArray(va) && va[0]?.lead_status) {
+        const ls = va[0].lead_status
+        if (Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId) {
+          matchValueAfterArr0++
+          matched = true
+          leadsUnicos.add(Number(r.entity_id))
+          if (exemplos.match_arr0.length < 2) exemplos.match_arr0.push({ entity_id: r.entity_id, at: r.created_at_kommo, raw_va: va })
+        }
+      }
+      if (!matched && va && !Array.isArray(va) && va?.lead_status) {
+        const ls = va.lead_status
+        if (Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId) {
+          matchValueAfterObj++
+          matched = true
+          leadsUnicos.add(Number(r.entity_id))
+        }
+      }
+      if (!matched && raw.event_data?.value_after) {
+        const vb = raw.event_data.value_after
+        const ls = Array.isArray(vb) ? vb[0]?.lead_status : vb?.lead_status
+        if (ls && Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId) {
+          matchEventData++
+          matched = true
+          leadsUnicos.add(Number(r.entity_id))
+        }
+      }
+      if (!matched) {
+        outroStatus++
+        if (exemplos.outro.length < 3) {
+          exemplos.outro.push({ entity_id: r.entity_id, at: r.created_at_kommo, value_after: raw.value_after, event_data_va: raw.event_data?.value_after })
+        }
+      }
+    }
+
+    // 3) Quantos leads únicos do total já estão em ia_leads_convertidos
+    const { getFeedbackSupabase } = await import('./server/iaFeedback/supabaseClient.js')
+    const sbFb = getFeedbackSupabase(process.env)
+    let jaDetectados = 0
+    let leadsAmostraNovos = []
+    if (sbFb && leadsUnicos.size > 0) {
+      const idsCsv = Array.from(leadsUnicos).slice(0, 1000).join(',')
+      const detectados = await sbFb.select('ia_leads_convertidos', `select=lead_id&lead_id=in.(${idsCsv})`)
+      const setDet = new Set((detectados || []).map((r) => Number(r.lead_id)))
+      jaDetectados = setDet.size
+      leadsAmostraNovos = Array.from(leadsUnicos).filter((id) => !setDet.has(id)).slice(0, 10)
+    }
+
+    // 4) Contagem só de ontem (UTC) — aceites do dia
+    const ontem = arr.filter((r) => r.created_at_kommo >= ontemMidnightIso)
+    let ontemMatch = 0
+    for (const r of ontem) {
+      const va = r.raw?.value_after
+      if (Array.isArray(va) && va[0]?.lead_status) {
+        const ls = va[0].lead_status
+        if (Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId) ontemMatch++
+      }
+    }
+
+    res.json({
+      config: { aceiteStatusId, aceitePipelineId, sevenDaysAgoIso, ontemMidnightIso },
+      total_lead_status_changed_7d: arr.length,
+      match_value_after_arr0: matchValueAfterArr0,
+      match_value_after_obj: matchValueAfterObj,
+      match_event_data_va: matchEventData,
+      outro_status: outroStatus,
+      leads_unicos_aceite_7d: leadsUnicos.size,
+      ja_detectados_em_ia_leads_convertidos: jaDetectados,
+      novos_estimados: leadsUnicos.size - jaDetectados,
+      ontem_lead_status_changed: ontem.length,
+      ontem_match_aceite: ontemMatch,
+      por_dia_lead_status_changed: porDia,
+      amostra_match_arr0: exemplos.match_arr0,
+      amostra_outro_status: exemplos.outro,
+      leads_amostra_supostamente_novos: leadsAmostraNovos,
+    })
+  } catch (e) {
+    console.error('[detector-diagnostic]', e.message)
+    res.status(500).json({ error: e.message, stack: e.stack?.split('\n').slice(0, 3) })
+  }
+})
+
 // Diagnóstico: contagem de propostas por status e origem, e timestamp da última criação.
 // Útil pra entender por que a aba 'Propostas de regras' está vazia.
 app.get('/api/ia-learning/proposals-diagnostic', async (_req, res) => {
