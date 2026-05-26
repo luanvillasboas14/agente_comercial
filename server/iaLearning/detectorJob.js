@@ -40,10 +40,20 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
 
   // 1) Busca eventos de mudança de status pro aceite nos últimos 7 dias
   let eventos = []
+  const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+
+  // Helper de filtragem defensiva (caso PostgREST traga eventos sem o status alvo)
+  const matchesAceite = (r) => {
+    const raw = r.raw || {}
+    const valueAfterArr = raw?.value_after || raw?.data?.value_after || []
+    const va = Array.isArray(valueAfterArr) ? valueAfterArr[0] : valueAfterArr
+    if (!va) return false
+    const ls = va?.lead_status || va
+    return Number(ls?.id) === aceiteStatusId && Number(ls?.pipeline_id) === aceitePipelineId
+  }
+
   try {
-    // Filtra diretamente no PostgREST via contains JSONB — pega só os eventos
-    // que mudaram pro status/pipeline alvo, sem trazer 15k+ rows desnecessárias.
-    const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    // Caminho 1 (rápido): filtra direto no PostgREST via contains JSONB.
     const containsObj = {
       value_after: [{ lead_status: { id: aceiteStatusId, pipeline_id: aceitePipelineId } }],
     }
@@ -57,21 +67,35 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
       `&order=created_at_kommo.desc` +
       `&limit=1000`,
     )
-    // PostgREST já filtrou; mas mantenho check defensivo
-    eventos = (Array.isArray(rows) ? rows : []).filter((r) => {
-      const raw = r.raw || {}
-      const valueAfterArr = raw?.value_after || raw?.data?.value_after || []
-      const va = Array.isArray(valueAfterArr) ? valueAfterArr[0] : valueAfterArr
-      if (!va) return false
-      const ls = va?.lead_status || va
-      return (
-        Number(ls?.id) === aceiteStatusId &&
-        Number(ls?.pipeline_id) === aceitePipelineId
-      )
-    })
+    eventos = (Array.isArray(rows) ? rows : []).filter(matchesAceite)
   } catch (e) {
-    console.error(`[IaLearning] detector: erro ao buscar eventos: ${e.message}`)
-    return { ok: false, reason: 'query_failed', error: e.message }
+    console.warn(`[IaLearning] detector: query rápida falhou (${e.message}). Tentando fallback paginado sem filtro JSONB...`)
+    try {
+      // Caminho 2 (fallback): pagina sem o filtro `raw=cs` (caso PostgREST não suporte
+      // ou o JSONB não tenha índice GIN). Mais lento mas robusto.
+      const PAGE = 1000
+      const MAX_PAGES = 20 // teto: 20k eventos em 7 dias
+      const acumulados = []
+      for (let p = 0; p < MAX_PAGES; p++) {
+        const offset = p * PAGE
+        const rows = await db.select(
+          'kommo_consultor_eventos',
+          `select=entity_id,created_at_kommo,created_by,raw` +
+          `&event_type=eq.lead_status_changed` +
+          `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+          `&order=created_at_kommo.desc` +
+          `&limit=${PAGE}&offset=${offset}`,
+        )
+        const arr = Array.isArray(rows) ? rows : []
+        acumulados.push(...arr)
+        if (arr.length < PAGE) break
+      }
+      console.log(`[IaLearning] detector: fallback trouxe ${acumulados.length} eventos lead_status_changed em 7d, filtrando localmente`)
+      eventos = acumulados.filter(matchesAceite)
+    } catch (e2) {
+      console.error(`[IaLearning] detector: erro ao buscar eventos (fallback também falhou): ${e2.message}`)
+      return { ok: false, reason: 'query_failed', error: e2.message }
+    }
   }
 
   console.log(`[IaLearning] detector: ${eventos.length} eventos de aceite encontrados nos últimos 7 dias`)

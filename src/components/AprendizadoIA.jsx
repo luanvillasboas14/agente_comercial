@@ -418,15 +418,28 @@ function ProposalCard({ proposal, onApply, onReject, busy }) {
             }}>
               {isAdicao ? 'adição' : 'ajuste'}
             </span>
-            <span style={{
-              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-              padding: '2px 7px', borderRadius: 4,
-              background: '#8b5cf622', color: '#8b5cf6',
-            }}>
-              aprendizado
-            </span>
+            {proposal.origem === 'aprendizado_positivo' ? (
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                padding: '2px 7px', borderRadius: 4,
+                background: '#8b5cf622', color: '#8b5cf6',
+              }}>
+                aprendizado
+              </span>
+            ) : (
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                padding: '2px 7px', borderRadius: 4,
+                background: 'oklch(68% 0.20 25 / 0.15)', color: 'oklch(40% 0.20 25)',
+              }}>
+                feedback
+              </span>
+            )}
             {proposal.support_count != null && (
               <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· apoio: {proposal.support_count} conversas</span>
+            )}
+            {proposal.total_violacoes > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>· {proposal.total_violacoes} violações</span>
             )}
             {proposal.obsoleta && (
               <span style={{ fontSize: 10, fontWeight: 700, color: 'oklch(40% 0.20 25)', padding: '2px 7px', borderRadius: 4, background: 'oklch(68% 0.20 25 / 0.15)' }}>
@@ -491,13 +504,16 @@ function TabPropostas({ proposals, loading, onApply, onReject, onRefresh, busyId
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
-          {proposals.length} proposta(s) pendente(s) geradas pelo Aprendizado IA
+          {proposals.length} proposta(s) pendente(s) ·{' '}
+          <span style={{ color: '#8b5cf6' }}>{proposals.filter((p) => p.origem === 'aprendizado_positivo').length} do aprendizado</span>
+          {' · '}
+          <span style={{ color: 'oklch(40% 0.20 25)' }}>{proposals.filter((p) => p.origem !== 'aprendizado_positivo').length} do feedback</span>
         </div>
         <button className="btn btn-sm" onClick={onRefresh} style={{ fontSize: 12 }}>Atualizar</button>
       </div>
       {proposals.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
-          Nenhuma proposta pendente. Rode "Analisar batch agora" na aba "Conversões pendentes" para gerar propostas a partir das conversas convertidas.
+          Nenhuma proposta pendente. Rode "Analisar batch agora" na aba "Conversões pendentes" para gerar propostas a partir das conversas convertidas, ou aguarde o Otimizador de Prompt gerar propostas a partir das violações detectadas.
         </div>
       ) : (
         proposals.map((p) => (

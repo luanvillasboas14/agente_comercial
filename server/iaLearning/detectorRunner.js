@@ -78,6 +78,12 @@ export async function runOnce(env, trigger = 'manual') {
   } finally {
     clearTimeout(watchdogTimer)
     if (!watchdogFired) {
+      // Compõe mensagem de erro completa: reason (categoria) + detalhe quando disponível.
+      // Antes mascaravamos 'query_failed' sem o erro real do PostgREST.
+      let errorMsg = null
+      if (runErr) errorMsg = runErr.message
+      else if (result?.reason) errorMsg = result.error ? `${result.reason}: ${result.error}` : result.reason
+
       lastResult = {
         finishedAt: new Date().toISOString(),
         trigger,
@@ -87,7 +93,7 @@ export async function runOnce(env, trigger = 'manual') {
         errosCaptura: result?.errosCaptura ?? 0,
         totalEventos: result?.totalEventos ?? 0,
         durationMs: Date.now() - startMs,
-        ...(runErr ? { error: runErr.message } : (result?.reason ? { error: result.reason } : {})),
+        ...(errorMsg ? { error: errorMsg } : {}),
       }
       jobRunning = false
       currentRunStartedAt = null

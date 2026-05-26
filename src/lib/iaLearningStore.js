@@ -70,11 +70,15 @@ export async function loadDetectorStatus() {
   return fetchJson('/api/ia-learning/detector/status')
 }
 
-/** Lista propostas pendentes do aprendizado positivo (filtrado client-side). */
+/**
+ * Lista TODAS as propostas pendentes (vindas de aprendizado positivo OU
+ * de feedback negativo do Otimizador). Cada uma carrega `origem` que a UI
+ * usa pra exibir badge correto.
+ */
 export async function loadAprendizadoProposals() {
-  const data = await fetchJson('/api/ia-feedback/proposals?status=pendente&limit=100')
+  const data = await fetchJson('/api/ia-feedback/proposals?status=pendente&limit=200')
   const rows = Array.isArray(data) ? data : (data.rows || data)
-  return (Array.isArray(rows) ? rows : []).filter((p) => p.origem === 'aprendizado_positivo')
+  return Array.isArray(rows) ? rows : []
 }
 
 export async function applyProposal(id) {
