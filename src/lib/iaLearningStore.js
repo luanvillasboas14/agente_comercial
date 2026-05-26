@@ -88,3 +88,7 @@ export async function applyProposal(id) {
 export async function rejectProposal(id) {
   return fetchJson(`/api/ia-feedback/proposals/${id}/reject`, { method: 'POST' })
 }
+
+export async function loadProposalsDiagnostic() {
+  return fetchJson('/api/ia-learning/proposals-diagnostic')
+}

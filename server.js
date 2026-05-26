@@ -357,6 +357,37 @@ app.get('/api/ia-learning/analyze/status', (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Diagnóstico: contagem de propostas por status e origem, e timestamp da última criação.
+// Útil pra entender por que a aba 'Propostas de regras' está vazia.
+app.get('/api/ia-learning/proposals-diagnostic', async (_req, res) => {
+  try {
+    const { listProposals: listProps } = await import('./server/iaFeedback/proposalsStore.js')
+    const all = await listProps(process.env, { limit: 100 })
+    const porStatus = {}
+    const porOrigem = {}
+    for (const p of all) {
+      porStatus[p.status || 'null'] = (porStatus[p.status || 'null'] || 0) + 1
+      porOrigem[p.origem || 'null'] = (porOrigem[p.origem || 'null'] || 0) + 1
+    }
+    const ultimaCriada = all[0]?.created_at || null
+    const ultimaAprendizado = all.find((p) => p.origem === 'aprendizado_positivo')?.created_at || null
+    res.json({
+      total: all.length,
+      porStatus,
+      porOrigem,
+      ultimaCriada,
+      ultimaAprendizado,
+      amostra: all.slice(0, 3).map((p) => ({
+        id: p.id,
+        status: p.status,
+        origem: p.origem,
+        regra_alvo: p.regra_alvo,
+        created_at: p.created_at,
+      })),
+    })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.post('/api/ia-learning/detector/run-now', async (_req, res) => {
   try {
     runDetectorOnce(process.env, 'manual').catch((e) => console.error('[ia-learning/detector] FAIL:', e.message))

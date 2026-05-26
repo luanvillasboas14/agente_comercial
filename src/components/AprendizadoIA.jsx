@@ -14,6 +14,7 @@ import {
   loadAprendizadoProposals,
   applyProposal,
   rejectProposal,
+  loadProposalsDiagnostic,
 } from '../lib/iaLearningStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -497,20 +498,60 @@ function ProposalCard({ proposal, onApply, onReject, busy }) {
 }
 
 function TabPropostas({ proposals, loading, onApply, onReject, onRefresh, busyId }) {
+  const [diag, setDiag] = useState(null)
+  const [diagLoading, setDiagLoading] = useState(false)
+
+  async function runDiag() {
+    setDiagLoading(true)
+    try { setDiag(await loadProposalsDiagnostic()) } catch (e) { setDiag({ error: e.message }) }
+    setDiagLoading(false)
+  }
+
   if (loading) {
     return <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>Carregando propostas...</div>
   }
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
           {proposals.length} proposta(s) pendente(s) ·{' '}
           <span style={{ color: '#8b5cf6' }}>{proposals.filter((p) => p.origem === 'aprendizado_positivo').length} do aprendizado</span>
           {' · '}
           <span style={{ color: 'oklch(40% 0.20 25)' }}>{proposals.filter((p) => p.origem !== 'aprendizado_positivo').length} do feedback</span>
         </div>
-        <button className="btn btn-sm" onClick={onRefresh} style={{ fontSize: 12 }}>Atualizar</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn btn-sm" onClick={runDiag} style={{ fontSize: 12 }} disabled={diagLoading}>
+            {diagLoading ? 'Diagnosticando...' : 'Diagnóstico'}
+          </button>
+          <button className="btn btn-sm" onClick={onRefresh} style={{ fontSize: 12 }}>Atualizar</button>
+        </div>
       </div>
+
+      {diag && (
+        <div className="card" style={{ padding: 12, marginBottom: 14, fontSize: 12, fontFamily: 'ui-monospace,monospace' }}>
+          {diag.error ? (
+            <div style={{ color: 'oklch(40% 0.20 25)' }}>Erro: {diag.error}</div>
+          ) : (
+            <>
+              <div><b>Total no banco (últimas 100):</b> {diag.total}</div>
+              <div><b>Por status:</b> {JSON.stringify(diag.porStatus)}</div>
+              <div><b>Por origem:</b> {JSON.stringify(diag.porOrigem)}</div>
+              <div><b>Última criada:</b> {diag.ultimaCriada || '-'}</div>
+              <div><b>Última de aprendizado:</b> {diag.ultimaAprendizado || '-'}</div>
+              {diag.amostra?.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <b>Amostra (3 mais recentes):</b>
+                  <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
+                    {diag.amostra.map((p) => (
+                      <li key={p.id}>[{p.status}] {p.origem || 'sem origem'} — {p.regra_alvo} ({p.created_at?.slice(0, 16)})</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {proposals.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
           Nenhuma proposta pendente. Rode "Analisar batch agora" na aba "Conversões pendentes" para gerar propostas a partir das conversas convertidas, ou aguarde o Otimizador de Prompt gerar propostas a partir das violações detectadas.
