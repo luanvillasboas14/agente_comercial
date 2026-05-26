@@ -253,6 +253,8 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
       activeVersionId = av?.id || null
     } catch (_) {}
 
+    let regrasInseridas = 0
+    let primeiroErroInsert = null
     for (const r of regrasAceitas) {
       try {
         await sb.insert('ia_prompt_proposals', {
@@ -271,9 +273,18 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
           support_count: Number(r.support_count) || 0,
           baseada_em_versao_id: activeVersionId,
         })
+        regrasInseridas++
       } catch (e) {
-        console.warn(`[IaLearning/analyzer] inserir regra falhou: ${e.message}`)
+        if (!primeiroErroInsert) primeiroErroInsert = e.message
+        console.error(`[IaLearning/analyzer] ❌ INSERT em ia_prompt_proposals FALHOU: ${e.message}`)
       }
+    }
+    if (regrasInseridas < regrasAceitas.length) {
+      console.error(
+        `[IaLearning/analyzer] ⚠ ATENÇÃO: ${regrasAceitas.length - regrasInseridas} de ${regrasAceitas.length} propostas NÃO foram salvas. ` +
+        `Primeiro erro: ${primeiroErroInsert}. ` +
+        `Provável causa: coluna origem/batch_aprendizado_id/support_count ausente — rode o ALTER TABLE de server/iaLearning/SCHEMA.sql`,
+      )
     }
 
     // 9) Persiste exemplos como ia_exemplos_conversas
@@ -296,14 +307,15 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
     // 10) Marca leads como processados
     await marcarProcessados(env, leadsIds, batchId)
 
-    // 11) Finaliza batch
+    // 11) Finaliza batch — registra o que REALMENTE foi salvo (não só o que LLM retornou)
     await finishBatch(env, batchId, {
-      status: 'success',
-      total_propostas_geradas: regrasAceitas.length,
-      total_propostas_descartadas: regrasDescartadas,
+      status: regrasInseridas === regrasAceitas.length ? 'success' : 'partial',
+      total_propostas_geradas: regrasInseridas,
+      total_propostas_descartadas: regrasDescartadas + (regrasAceitas.length - regrasInseridas),
       total_exemplos_gerados: exemplosAceitos.length,
       total_exemplos_descartados: exemplosDescartados,
       raw_analyzer_response: rawJson,
+      ...(primeiroErroInsert ? { error_message: `INSERT falhou: ${primeiroErroInsert.slice(0, 500)}` } : {}),
     })
 
     return {
@@ -312,10 +324,12 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
       totalLeads: leadsParaBatch.length,
       totalMensagens,
       modelo,
-      regrasGeradas: regrasAceitas.length,
+      regrasGeradas: regrasInseridas,
+      regrasPropostas: regrasAceitas.length,
       regrasDescartadas,
       exemplosGerados: exemplosAceitos.length,
       exemplosDescartados,
+      ...(primeiroErroInsert ? { warning: `INSERT falhou em ${regrasAceitas.length - regrasInseridas} propostas: ${primeiroErroInsert}` } : {}),
     }
   } catch (err) {
     console.error(`[IaLearning] analyzer FAIL: ${err.message}`)
