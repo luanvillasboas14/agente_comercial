@@ -523,7 +523,20 @@ app.get('/api/ia-learning/aceite-events-direct', async (req, res) => {
       )
       const setNoBanco = new Set((rows || []).map((r) => Number(r.entity_id)))
       presentesEmKommoEventos = leadIdsAceite.filter((id) => setNoBanco.has(id)).length
-      amostraAusentes = leadIdsAceite.filter((id) => !setNoBanco.has(id)).slice(0, 20)
+      // Amostra de ausentes: enriquece com created_by do evento original (vem do Kommo)
+      const aceiteByLead = new Map()
+      for (const ev of aceiteEvents) {
+        const lid = Number(ev.entity_id)
+        if (!aceiteByLead.has(lid)) aceiteByLead.set(lid, ev)
+      }
+      amostraAusentes = leadIdsAceite.filter((id) => !setNoBanco.has(id)).slice(0, 20).map((lid) => {
+        const ev = aceiteByLead.get(lid)
+        return {
+          lead_id: lid,
+          created_by: ev?.created_by ?? null,
+          created_at: ev?.created_at ? new Date(ev.created_at * 1000).toISOString() : null,
+        }
+      })
     }
 
     res.json({
