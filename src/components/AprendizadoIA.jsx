@@ -15,6 +15,8 @@ import {
   applyProposal,
   rejectProposal,
   loadProposalsDiagnostic,
+  triggerAceiteSyncNow,
+  loadAceiteSyncStatus,
 } from '../lib/iaLearningStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -147,7 +149,7 @@ function DialogModal({ example, onClose }) {
 
 // ─── Sub-tab Conversões ───────────────────────────────────────────────────────
 
-function TabConversoes({ status, recentes, onAnalyze, onDetectNow, loading, analyzing, detecting }) {
+function TabConversoes({ status, recentes, onAnalyze, onDetectNow, onSyncAceites, loading, analyzing, detecting, syncing }) {
   const min = status?.min_batch_size || 50
   const count = status?.pendentes_count || 0
   const canAnalyze = status?.can_analyze || false
@@ -170,7 +172,15 @@ function TabConversoes({ status, recentes, onAnalyze, onDetectNow, loading, anal
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-sm"
+              onClick={onSyncAceites}
+              disabled={syncing}
+              style={{ fontSize: 12 }}
+            >
+              {syncing ? 'Sincronizando...' : 'Sincronizar aceites'}
+            </button>
             <button
               className="btn btn-sm"
               onClick={onDetectNow}
@@ -591,6 +601,7 @@ export default function AprendizadoIA() {
 
   const [analyzing, setAnalyzing] = useState(false)
   const [detecting, setDetecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
 
@@ -798,6 +809,60 @@ export default function AprendizadoIA() {
     setDetecting(false)
   }
 
+  async function handleSyncAceites() {
+    setError(null)
+    setSuccessMsg(null)
+    setSyncing(true)
+    try {
+      await triggerAceiteSyncNow()
+      setSuccessMsg('Sincronização de aceites iniciada. Acompanhando...')
+      pollAceiteSyncUntilDone()
+    } catch (e) {
+      setError(e.message)
+      setSyncing(false)
+    }
+  }
+
+  async function pollAceiteSyncUntilDone() {
+    const triggerTs = Date.now()
+    await new Promise((r) => setTimeout(r, 1500))
+    const pollInterval = 4000
+    const maxWaitMs = 15 * 60 * 1000
+    const startedAt = Date.now()
+
+    while (Date.now() - startedAt < maxWaitMs) {
+      let st
+      try {
+        st = await loadAceiteSyncStatus()
+      } catch {
+        await new Promise((r) => setTimeout(r, pollInterval))
+        continue
+      }
+
+      if (st.running) {
+        const elapsedSec = st.startedAt
+          ? Math.round((Date.now() - new Date(st.startedAt).getTime()) / 1000)
+          : 0
+        setSuccessMsg(`Sincronizando aceites D-1 no Kommo... ${elapsedSec}s`)
+      } else if (st.lastResult && new Date(st.lastResult.finishedAt).getTime() >= triggerTs) {
+        const r = st.lastResult
+        const dur = Math.round((r.durationMs || 0) / 1000)
+        if (r.ok) {
+          setSuccessMsg(
+            `✓ Aceites sincronizados em ${dur}s · ${r.totalInseridos ?? 0} inseridos · ${r.totalAceites ?? 0} aceites (${r.totalEventos ?? 0} eventos avaliados)`,
+          )
+        } else {
+          setError(`Sincronização de aceites falhou: ${r.error || 'erro desconhecido'} (após ${dur}s)`)
+        }
+        setSyncing(false)
+        return
+      }
+      await new Promise((r) => setTimeout(r, pollInterval))
+    }
+    setError('Timeout: sincronização de aceites excedeu 15min sem retornar status finalizado.')
+    setSyncing(false)
+  }
+
   async function handleExampleAction(id, action) {
     const { activateExample: activate, rejectExample: reject, archiveExample: archive } = await import('../lib/iaLearningStore')
     const fn = action === 'activate' ? activate : action === 'reject' ? reject : archive
@@ -860,9 +925,11 @@ export default function AprendizadoIA() {
           recentes={recentes}
           onAnalyze={handleAnalyze}
           onDetectNow={handleDetectNow}
+          onSyncAceites={handleSyncAceites}
           loading={loadingRecentes}
           analyzing={analyzing}
           detecting={detecting}
+          syncing={syncing}
         />
       )}
       {subTab === 'propostas' && (

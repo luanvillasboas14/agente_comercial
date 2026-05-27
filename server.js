@@ -57,6 +57,7 @@ import { analyzeRule, runMultiViolationAnalyzer, runAcertosAnalyzer } from './se
 import { createAcerto, listAcertos, markAcertosProcessados } from './server/iaFeedback/acertosStore.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
 import { startDetectorScheduler, runOnce as runDetectorOnce, getDetectorRunnerStatus } from './server/iaLearning/detectorRunner.js'
+import { startAceiteSyncScheduler, runOnce as runAceiteSyncOnce, getAceiteSyncStatus } from './server/iaLearning/aceiteSyncRunner.js'
 import { runAnalyzerOnce, getAnalyzerRunnerStatus } from './server/iaLearning/analyzerRunner.js'
 import { listRecentes, listPendentes, countPendentes } from './server/iaLearning/leadsConvertidosStore.js'
 import { listBatches, getBatch } from './server/iaLearning/batchesStore.js'
@@ -793,6 +794,19 @@ app.post('/api/ia-learning/detector/run-now', async (_req, res) => {
 app.get('/api/ia-learning/detector/status', (_req, res) => {
   try {
     res.json(getDetectorRunnerStatus())
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/ia-learning/aceite-sync/run-now', async (_req, res) => {
+  try {
+    runAceiteSyncOnce(process.env, 'manual').catch((e) => console.error('[ia-learning/aceite-sync] FAIL:', e.message))
+    res.json({ ok: true, started: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/ia-learning/aceite-sync/status', (_req, res) => {
+  try {
+    res.json(getAceiteSyncStatus())
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -3060,6 +3074,10 @@ app.listen(PORT, async () => {
   try {
     startDetectorScheduler(process.env)
   } catch (e) { console.error('[IaLearning] falha ao iniciar detector scheduler:', e.message) }
+
+  try {
+    startAceiteSyncScheduler(process.env)
+  } catch (e) { console.error('[IaLearning] falha ao iniciar aceite sync scheduler:', e.message) }
 
   // Otimizador de Prompt — seed da versão inicial e cache em memória
   await seedInitialVersionIfEmpty(process.env).catch((err) =>

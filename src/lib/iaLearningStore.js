@@ -92,3 +92,11 @@ export async function rejectProposal(id) {
 export async function loadProposalsDiagnostic() {
   return fetchJson('/api/ia-learning/proposals-diagnostic')
 }
+
+export async function triggerAceiteSyncNow() {
+  return fetchJson('/api/ia-learning/aceite-sync/run-now', { method: 'POST' })
+}
+
+export async function loadAceiteSyncStatus() {
+  return fetchJson('/api/ia-learning/aceite-sync/status')
+}

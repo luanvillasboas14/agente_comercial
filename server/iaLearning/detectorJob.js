@@ -110,8 +110,41 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
     }
   }
 
-  console.log(`[IaLearning] detector: ${eventos.length} eventos de aceite encontrados nos últimos 7 dias`)
-  reportProgress({ total: eventos.length, processados: 0, novos: 0, skipJaDetectado: 0, errosCaptura: 0 })
+  // 1b) Busca também em ia_aceites_eventos (captura eventos de automações sem created_by)
+  let eventosAceiteTab = []
+  try {
+    const aceitesRows = await db.select(
+      'ia_aceites_eventos',
+      `select=entity_id,created_at_kommo,created_by,raw` +
+      `&created_at_kommo=gte.${encodeURIComponent(sevenDaysAgoIso)}` +
+      `&order=created_at_kommo.desc` +
+      `&limit=1000`,
+    )
+    eventosAceiteTab = Array.isArray(aceitesRows) ? aceitesRows : []
+  } catch (e) {
+    console.warn(`[IaLearning] detector: falha ao buscar ia_aceites_eventos: ${e.message}`)
+  }
+
+  // Merge por entity_id, prefere o registro mais recente por created_at_kommo.
+  // Garante que leadJaDetectado seja chamado 1× por lead mesmo que o mesmo
+  // entity_id apareça nas duas fontes.
+  const mergedMap = new Map()
+  for (const e of [...eventos, ...eventosAceiteTab]) {
+    const key = Number(e.entity_id)
+    if (!key || !Number.isFinite(key) || key <= 0) continue
+    const existing = mergedMap.get(key)
+    if (!existing || new Date(e.created_at_kommo) > new Date(existing.created_at_kommo)) {
+      mergedMap.set(key, e)
+    }
+  }
+  const eventosMerged = [...mergedMap.values()]
+
+  console.log(
+    `[IaLearning] detector: kommo_consultor_eventos=${eventos.length} aceites_eventos=${eventosAceiteTab.length} total_merged=${eventosMerged.length}`,
+  )
+
+  console.log(`[IaLearning] detector: ${eventosMerged.length} eventos de aceite únicos encontrados nos últimos 7 dias`)
+  reportProgress({ total: eventosMerged.length, processados: 0, novos: 0, skipJaDetectado: 0, errosCaptura: 0 })
 
   // 2) Busca mapa de consultores para resolução de nome
   let consultoresMap = new Map()
@@ -128,7 +161,7 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
   let skipJaDetectado = 0
   let errosCaptura = 0
 
-  for (const evento of eventos) {
+  for (const evento of eventosMerged) {
     const leadId = Number(evento.entity_id)
     if (!Number.isFinite(leadId) || leadId <= 0) continue
 
@@ -185,7 +218,7 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
       }
     }
 
-    reportProgress({ total: eventos.length, processados: novos + skipJaDetectado + errosCaptura, novos, skipJaDetectado, errosCaptura })
+    reportProgress({ total: eventosMerged.length, processados: novos + skipJaDetectado + errosCaptura, novos, skipJaDetectado, errosCaptura })
 
     // Delay entre leads para não bombardear Kommo
     await sleep(1200)
@@ -201,6 +234,6 @@ export async function runDetectorJob(env, { trigger = 'manual', onProgress = nul
     novos,
     skipJaDetectado,
     errosCaptura,
-    totalEventos: eventos.length,
+    totalEventos: eventosMerged.length,
   }
 }
