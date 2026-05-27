@@ -28,26 +28,25 @@ function getClient(env) {
 export async function createProposal(env, payload) {
   const sb = getClient(env)
   try {
-    const inserted = await sb.insert(
-      'ia_prompt_proposals',
-      {
-        baseada_em_versao_id: payload.baseada_em_versao_id,
-        modelo_analisador: payload.modelo_analisador,
-        status: 'pendente',
-        regra_alvo: payload.regra_alvo,
-        tipo_mudanca: payload.tipo_mudanca,
-        trecho_antes: payload.trecho_antes || '',
-        trecho_depois: payload.trecho_depois || '',
-        justificativa: payload.justificativa,
-        conflitos_potenciais: payload.conflitos_potenciais || null,
-        exemplos_violacoes: payload.exemplos_violacoes || null,
-        total_violacoes: payload.total_violacoes,
-        janela_de: payload.janela_de,
-        janela_ate: payload.janela_ate,
-        created_at: new Date().toISOString(),
-      },
-      true,
-    )
+    const row = {
+      baseada_em_versao_id: payload.baseada_em_versao_id,
+      modelo_analisador: payload.modelo_analisador,
+      status: 'pendente',
+      regra_alvo: payload.regra_alvo,
+      tipo_mudanca: payload.tipo_mudanca,
+      trecho_antes: payload.trecho_antes || '',
+      trecho_depois: payload.trecho_depois || '',
+      justificativa: payload.justificativa,
+      conflitos_potenciais: payload.conflitos_potenciais || null,
+      exemplos_violacoes: payload.exemplos_violacoes || null,
+      total_violacoes: payload.total_violacoes,
+      janela_de: payload.janela_de,
+      janela_ate: payload.janela_ate,
+      created_at: new Date().toISOString(),
+    }
+    if (payload.origem != null) row.origem = payload.origem
+    if (payload.violacoes_origem_ids != null) row.violacoes_origem_ids = payload.violacoes_origem_ids
+    const inserted = await sb.insert('ia_prompt_proposals', row, true)
     return Array.isArray(inserted) ? inserted[0] : inserted
   } catch (err) {
     throw new Error(`[proposalsStore/supabase] createProposal: ${err.message}`)

@@ -150,3 +150,36 @@ export async function syncPromptFromFallback() {
   }
   return text ? JSON.parse(text) : {}
 }
+
+// ─── Multi-violação ───────────────────────────────────────────────────────────
+
+export async function analyzeMultiViolations(violationIds, hint) {
+  return apiFetch(`${BASE}/analyze-multi`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ violationIds, hint: hint || undefined }),
+  })
+}
+
+// ─── Acertos (falsos positivos) ───────────────────────────────────────────────
+
+export async function createAcerto({ feedback_id, regra, citacao, descricao_violacao, motivo }) {
+  return apiFetch(`${BASE}/acertos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feedback_id, regra, citacao, descricao_violacao, motivo }),
+  })
+}
+
+export async function loadAcertos(status) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiFetch(`${BASE}/acertos${qs}`)
+}
+
+export async function analyzeAcertos(acertoIds, hint) {
+  return apiFetch(`${BASE}/acertos/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acertoIds, hint: hint || undefined }),
+  })
+}

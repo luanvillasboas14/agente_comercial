@@ -53,7 +53,8 @@ import { evaluateLead } from './server/iaFeedbackJob.js'
 import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionById, createVersionAndActivate, rollbackToVersion } from './server/iaFeedback/promptVersionStore.js'
 import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected, isProposalObsolete } from './server/iaFeedback/proposalsStore.js'
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
-import { analyzeRule } from './server/iaFeedback/promptAnalyzer.js'
+import { analyzeRule, runMultiViolationAnalyzer, runAcertosAnalyzer } from './server/iaFeedback/promptAnalyzer.js'
+import { createAcerto, listAcertos, markAcertosProcessados } from './server/iaFeedback/acertosStore.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
 import { startDetectorScheduler, runOnce as runDetectorOnce, getDetectorRunnerStatus } from './server/iaLearning/detectorRunner.js'
 import { runAnalyzerOnce, getAnalyzerRunnerStatus } from './server/iaLearning/analyzerRunner.js'
@@ -2746,6 +2747,157 @@ app.post('/api/ia-feedback/prompt-versions/sync-from-fallback', async (req, res)
     res.json({ ok: true, new_version: { id: newVersion.id, versao: newVersion.versao } })
   } catch (e) {
     console.error('[ia-feedback/prompt-versions/sync-from-fallback]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+// ── Análise multi-violação ──
+
+app.post('/api/ia-feedback/analyze-multi', async (req, res) => {
+  try {
+    const { violationIds, hint } = req.body || {}
+    if (!Array.isArray(violationIds) || violationIds.length === 0) {
+      return res.status(400).json({ error: 'violationIds deve ser um array não vazio de strings no formato "feedbackId:regra"' })
+    }
+    if (violationIds.length > 30) {
+      return res.status(400).json({ error: 'Máximo de 30 violações por análise' })
+    }
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) {
+      return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+    }
+
+    const result = await runMultiViolationAnalyzer(process.env, {
+      violationIds,
+      hint: hint || null,
+      activeVersion,
+    })
+
+    // Salva cada proposta gerada
+    const savedProposalIds = []
+    const exemplosViolacoes = violationIds.map((vid) => ({ violation_id: vid }))
+
+    for (const p of result.propostas) {
+      const saved = await createProposal(process.env, {
+        baseada_em_versao_id: activeVersion.id,
+        modelo_analisador: resolveModel(process.env, 'prompt_optimizer'),
+        regra_alvo: p.regra_alvo,
+        tipo_mudanca: p.tipo_mudanca,
+        trecho_antes: p.trecho_antes || '',
+        trecho_depois: p.trecho_depois || '',
+        justificativa: p.justificativa,
+        conflitos_potenciais: p.conflitos_potenciais || null,
+        exemplos_violacoes: exemplosViolacoes,
+        total_violacoes: result.violacoesEncontradas,
+        janela_de: result.janela_de,
+        janela_ate: result.janela_ate,
+        origem: 'feedback_negativo',
+        violacoes_origem_ids: violationIds,
+      })
+      savedProposalIds.push(saved?.id || null)
+    }
+
+    res.json({
+      ok: true,
+      proposalIds: savedProposalIds.filter(Boolean),
+      totalPropostas: result.propostas.length,
+      violacoesEncontradas: result.violacoesEncontradas,
+    })
+  } catch (e) {
+    console.error('[ia-feedback/analyze-multi]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+// ── Acertos (falsos positivos) ──
+
+app.post('/api/ia-feedback/acertos', async (req, res) => {
+  try {
+    const { feedback_id, regra, citacao, descricao_violacao, motivo } = req.body || {}
+    if (!feedback_id) return res.status(400).json({ error: 'feedback_id é obrigatório' })
+    if (!regra) return res.status(400).json({ error: 'regra é obrigatório' })
+
+    const acerto = await createAcerto(process.env, { feedback_id, regra, citacao, descricao_violacao, motivo })
+    res.json({ ok: true, acerto })
+  } catch (e) {
+    console.error('[ia-feedback/acertos POST]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/acertos', async (req, res) => {
+  try {
+    const { status, limit } = req.query
+    const acertos = await listAcertos(process.env, {
+      status: status || undefined,
+      limit: limit ? Math.min(200, Math.max(1, Number(limit))) : 50,
+    })
+    res.json(acertos)
+  } catch (e) {
+    console.error('[ia-feedback/acertos GET]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/acertos/analyze', async (req, res) => {
+  try {
+    const { acertoIds, hint } = req.body || {}
+    if (!Array.isArray(acertoIds) || acertoIds.length === 0) {
+      return res.status(400).json({ error: 'acertoIds deve ser um array não vazio de UUIDs' })
+    }
+    if (acertoIds.length > 20) {
+      return res.status(400).json({ error: 'Máximo de 20 acertos por análise' })
+    }
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) {
+      return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+    }
+
+    const result = await runAcertosAnalyzer(process.env, {
+      acertoIds,
+      hint: hint || null,
+      activeVersion,
+    })
+
+    // Salva cada proposta gerada
+    const savedProposalIds = []
+    for (const p of result.propostas) {
+      const saved = await createProposal(process.env, {
+        baseada_em_versao_id: activeVersion.id,
+        modelo_analisador: resolveModel(process.env, 'prompt_optimizer'),
+        regra_alvo: p.regra_alvo,
+        tipo_mudanca: p.tipo_mudanca,
+        trecho_antes: p.trecho_antes || '',
+        trecho_depois: p.trecho_depois || '',
+        justificativa: p.justificativa,
+        conflitos_potenciais: p.conflitos_potenciais || null,
+        exemplos_violacoes: acertoIds.map((id) => ({ acerto_id: id })),
+        total_violacoes: result.acertosEncontrados,
+        janela_de: result.janela_de,
+        janela_ate: result.janela_ate,
+        origem: 'falso_positivo',
+        violacoes_origem_ids: null,
+      })
+      savedProposalIds.push(saved?.id || null)
+    }
+
+    const firstProposalId = savedProposalIds.find(Boolean) || null
+
+    // Marca acertos como processados
+    await markAcertosProcessados(process.env, acertoIds, firstProposalId).catch((e) => {
+      console.error('[ia-feedback/acertos/analyze] markAcertosProcessados falhou:', e.message)
+    })
+
+    res.json({
+      ok: true,
+      proposalIds: savedProposalIds.filter(Boolean),
+      totalPropostas: result.propostas.length,
+      acertosEncontrados: result.acertosEncontrados,
+    })
+  } catch (e) {
+    console.error('[ia-feedback/acertos/analyze]', e.message)
     res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
   }
 })

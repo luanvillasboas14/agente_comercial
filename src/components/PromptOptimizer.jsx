@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Wand2, RefreshCw, ChevronDown, ChevronRight, AlertTriangle,
   CheckCircle, Clock, Copy, Loader, History, FileText, RotateCcw,
-  X, Zap, GitCompare,
+  X, Zap, GitCompare, ThumbsUp, Square, CheckSquare,
 } from 'lucide-react'
 import {
   loadViolationsRanking,
@@ -15,6 +15,9 @@ import {
   loadPromptVersionById,
   rollbackPromptVersion,
   syncPromptFromFallback,
+  analyzeMultiViolations,
+  loadAcertos,
+  analyzeAcertos,
 } from '../lib/iaFeedbackStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -347,8 +350,28 @@ function ProposalCard({ proposal, onAccepted, onRejected }) {
           </span>
         )}
         {proposal.origem === 'aprendizado_positivo' && (
-          <span style={{ background: 'var(--success, oklch(72% 0.14 155))', color: '#fff', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
+          <span style={{ background: 'oklch(72% 0.14 155)', color: '#fff', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
             aprendizado
+          </span>
+        )}
+        {proposal.origem === 'feedback_negativo' && Array.isArray(proposal.violacoes_origem_ids) && proposal.violacoes_origem_ids.length > 1 && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            background: 'oklch(60% 0.18 240 / 0.15)', color: 'oklch(35% 0.18 240)',
+            border: '1px solid oklch(60% 0.18 240 / 0.35)',
+            padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+          }}>
+            multi · {proposal.violacoes_origem_ids.length} violações
+          </span>
+        )}
+        {proposal.origem === 'falso_positivo' && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            background: 'oklch(72% 0.14 155 / 0.15)', color: 'oklch(30% 0.14 155)',
+            border: '1px solid oklch(72% 0.14 155 / 0.35)',
+            padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+          }}>
+            <ThumbsUp size={10} /> acerto
           </span>
         )}
         {proposal.support_count != null && (
@@ -649,9 +672,12 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
   const [ranking, setRanking] = useState(null)
   const [loading, setLoading] = useState(false)
   const [analyzing, setAnalyzing] = useState(null)
+  const [analyzingMulti, setAnalyzingMulti] = useState(false)
   const [expandedRegra, setExpandedRegra] = useState(null)
   const [error, setError] = useState(null)
   const [analyzeError, setAnalyzeError] = useState(null)
+  // violation IDs no formato "feedbackId:regra"
+  const [selectedViolationIds, setSelectedViolationIds] = useState(new Set())
 
   async function load() {
     setLoading(true)
@@ -659,6 +685,7 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
     try {
       const data = await loadViolationsRanking()
       setRanking(data)
+      setSelectedViolationIds(new Set())
     } catch (e) {
       setError(e.message)
     } finally {
@@ -667,6 +694,20 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
   }
 
   useEffect(() => { load() }, [refreshKey])
+
+  function makeViolationId(feedbackId, regra) {
+    return `${feedbackId}:${regra}`
+  }
+
+  function toggleViolation(feedbackId, regra) {
+    const vid = makeViolationId(feedbackId, regra)
+    setSelectedViolationIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(vid)) next.delete(vid)
+      else next.add(vid)
+      return next
+    })
+  }
 
   async function handleAnalyze(regra) {
     setAnalyzeError(null)
@@ -681,28 +722,64 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
     }
   }
 
+  async function handleAnalyzeMulti() {
+    if (selectedViolationIds.size === 0) return
+    setAnalyzeError(null)
+    setAnalyzingMulti(true)
+    try {
+      await analyzeMultiViolations([...selectedViolationIds])
+      setSelectedViolationIds(new Set())
+      onAnalyzeComplete?.()
+    } catch (e) {
+      setAnalyzeError(`Erro na análise conjunta: ${e.message}`)
+    } finally {
+      setAnalyzingMulti(false)
+    }
+  }
+
+  const nSelected = selectedViolationIds.size
+
   return (
     <div style={{
       padding: '16px 18px', borderRadius: 12,
       background: 'var(--bg-2)', border: '1px solid var(--line-1)', marginBottom: 20,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>
           Ranking de violações na janela atual
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '5px 12px', borderRadius: 8, fontSize: 11,
-            background: 'var(--bg-1)', border: '1px solid var(--line-1)',
-            color: 'var(--fg-2)', cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-        >
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          Atualizar ranking
-        </button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {nSelected > 0 && (
+            <button
+              onClick={handleAnalyzeMulti}
+              disabled={analyzingMulti}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '5px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: 'oklch(60% 0.18 240 / 0.15)', border: '1px solid oklch(60% 0.18 240 / 0.40)',
+                color: 'oklch(35% 0.18 240)',
+                cursor: analyzingMulti ? 'not-allowed' : 'pointer',
+                opacity: analyzingMulti ? 0.6 : 1,
+              }}
+            >
+              {analyzingMulti ? <Loader size={11} className="spin" /> : <Zap size={11} />}
+              {analyzingMulti ? 'Analisando...' : `Analisar selecionadas (${nSelected})`}
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '5px 12px', borderRadius: 8, fontSize: 11,
+              background: 'var(--bg-1)', border: '1px solid var(--line-1)',
+              color: 'var(--fg-2)', cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Atualizar ranking
+          </button>
+        </div>
       </div>
 
       {ranking && (
@@ -747,11 +824,12 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
         <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden' }}>
           {/* Header da tabela */}
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 80px 160px auto',
+            display: 'grid', gridTemplateColumns: '24px 1fr 80px 160px auto',
             padding: '8px 14px', background: 'var(--bg-1)',
             borderBottom: '1px solid var(--line-1)',
             fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.04,
           }}>
+            <span />
             <span>Regra</span>
             <span>Violações</span>
             <span>Alta / Média / Baixa</span>
@@ -761,10 +839,23 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
           {ranking.ranking.map((item, i) => (
             <div key={item.regra} style={{ borderTop: i > 0 ? '1px solid var(--line-1)' : 'none' }}>
               <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 80px 160px auto',
+                display: 'grid', gridTemplateColumns: '24px 1fr 80px 160px auto',
                 alignItems: 'center', padding: '10px 14px',
                 background: expandedRegra === item.regra ? 'oklch(60% 0.10 265 / 0.05)' : 'transparent',
               }}>
+                {/* Checkbox da regra (seleciona o primeiro exemplo) */}
+                {item.exemplos.length > 0 ? (
+                  <button
+                    onClick={() => toggleViolation(item.exemplos[0].feedback_id, item.regra)}
+                    title="Selecionar principal violação desta regra"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--fg-3)', display: 'flex' }}
+                  >
+                    {selectedViolationIds.has(makeViolationId(item.exemplos[0].feedback_id, item.regra))
+                      ? <CheckSquare size={14} style={{ color: 'oklch(35% 0.18 240)' }} />
+                      : <Square size={14} />
+                    }
+                  </button>
+                ) : <span />}
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}>{item.regra}</span>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)', fontVariantNumeric: 'tabular-nums' }}>
                   {item.count}
@@ -806,52 +897,239 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
               {expandedRegra === item.regra && item.exemplos.length > 0 && (
                 <div style={{ padding: '10px 14px', background: 'var(--bg-1)', borderTop: '1px solid var(--line-1)' }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', marginBottom: 8 }}>
-                    Exemplos
+                    Exemplos — clique no checkbox para incluir na análise conjunta
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {item.exemplos.map((ex, ei) => (
-                      <div key={ei} style={{
-                        padding: '8px 10px', borderRadius: 7,
-                        background: 'var(--bg-2)', border: '1px solid var(--line-1)',
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                          <SevBadge sev={ex.severidade} />
-                          {ex.execution_id && (
-                            <>
-                              <span style={{
-                                fontFamily: 'monospace', fontSize: 10, color: 'var(--fg-3)',
-                                padding: '1px 5px', background: 'var(--bg-1)', borderRadius: 3,
-                              }}>
-                                {ex.execution_id}
-                              </span>
-                              <button
-                                onClick={() => navigator.clipboard?.writeText(ex.execution_id)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', padding: 2, display: 'flex' }}
-                                title="Copiar ID"
-                              >
-                                <Copy size={10} />
-                              </button>
-                            </>
-                          )}
-                          <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 'auto' }}>{fmt(ex.created_at)}</span>
-                        </div>
-                        {ex.citacao && (
-                          <div style={{
-                            fontSize: 11, color: 'var(--fg-3)', fontStyle: 'italic',
-                            padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4,
-                            borderLeft: '2px solid var(--line-2)', marginBottom: 4,
-                          }}>
-                            "{ex.citacao}"
+                    {item.exemplos.map((ex, ei) => {
+                      const vid = makeViolationId(ex.feedback_id, item.regra)
+                      const isSelected = selectedViolationIds.has(vid)
+                      return (
+                        <div key={ei} style={{
+                          padding: '8px 10px', borderRadius: 7,
+                          background: isSelected ? 'oklch(60% 0.18 240 / 0.08)' : 'var(--bg-2)',
+                          border: `1px solid ${isSelected ? 'oklch(60% 0.18 240 / 0.35)' : 'var(--line-1)'}`,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <button
+                              onClick={() => toggleViolation(ex.feedback_id, item.regra)}
+                              title={isSelected ? 'Remover da seleção' : 'Adicionar à seleção'}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--fg-3)', display: 'flex', flexShrink: 0 }}
+                            >
+                              {isSelected
+                                ? <CheckSquare size={13} style={{ color: 'oklch(35% 0.18 240)' }} />
+                                : <Square size={13} />
+                              }
+                            </button>
+                            <SevBadge sev={ex.severidade} />
+                            {ex.execution_id && (
+                              <>
+                                <span style={{
+                                  fontFamily: 'monospace', fontSize: 10, color: 'var(--fg-3)',
+                                  padding: '1px 5px', background: 'var(--bg-1)', borderRadius: 3,
+                                }}>
+                                  {ex.execution_id}
+                                </span>
+                                <button
+                                  onClick={() => navigator.clipboard?.writeText(ex.execution_id)}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', padding: 2, display: 'flex' }}
+                                  title="Copiar ID"
+                                >
+                                  <Copy size={10} />
+                                </button>
+                              </>
+                            )}
+                            <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 'auto' }}>{fmt(ex.created_at)}</span>
                           </div>
-                        )}
-                        <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>{ex.descricao}</div>
-                      </div>
-                    ))}
+                          {ex.citacao && (
+                            <div style={{
+                              fontSize: 11, color: 'var(--fg-3)', fontStyle: 'italic',
+                              padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4,
+                              borderLeft: '2px solid var(--line-2)', marginBottom: 4,
+                            }}>
+                              "{ex.citacao}"
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>{ex.descricao}</div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Seção 1b: Acertos pendentes ─────────────────────────────────────────────
+
+function AcertosPendentes({ onAnalyzeComplete }) {
+  const [acertos, setAcertos] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [error, setError] = useState(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    loadAcertos('pendente').then((rows) => {
+      setAcertos(Array.isArray(rows) ? rows : [])
+      setLoading(false)
+    }).catch((e) => {
+      setError(e.message)
+      setLoading(false)
+    })
+  }, [])
+
+  useEffect(() => { if (open) load() }, [open, load])
+
+  function toggleAcerto(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function handleAnalyzeAcertos() {
+    if (selectedIds.size === 0) return
+    setError(null)
+    setAnalyzing(true)
+    try {
+      await analyzeAcertos([...selectedIds])
+      setSelectedIds(new Set())
+      load()
+      onAnalyzeComplete?.()
+    } catch (e) {
+      setError(`Erro ao analisar acertos: ${e.message}`)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const nPendentes = acertos.length
+  const nSelected = selectedIds.size
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <button
+        onClick={() => setOpen((p) => !p)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '10px 14px', borderRadius: 10, fontSize: 12, fontWeight: 500,
+          background: 'oklch(72% 0.14 155 / 0.08)', border: '1px solid oklch(72% 0.14 155 / 0.25)',
+          color: 'oklch(35% 0.14 155)', cursor: 'pointer', width: '100%',
+        }}
+      >
+        <ThumbsUp size={13} />
+        Acertos pendentes {nPendentes > 0 ? `(${nPendentes})` : ''}
+        <span style={{ fontSize: 10, color: 'oklch(45% 0.14 155)', fontWeight: 400, marginLeft: 4 }}>
+          — falsos positivos confirmados aguardando análise
+        </span>
+        {open ? <ChevronDown size={13} style={{ marginLeft: 'auto' }} /> : <ChevronRight size={13} style={{ marginLeft: 'auto' }} />}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8, border: '1px solid oklch(72% 0.14 155 / 0.25)', borderRadius: 10, overflow: 'hidden' }}>
+          {/* Toolbar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', background: 'oklch(72% 0.14 155 / 0.05)',
+            borderBottom: '1px solid oklch(72% 0.14 155 / 0.20)',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+              {loading ? 'Carregando...' : `${nPendentes} acerto(s) aguardando análise`}
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {nSelected > 0 && (
+                <button
+                  onClick={handleAnalyzeAcertos}
+                  disabled={analyzing}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '5px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    background: 'oklch(72% 0.14 155 / 0.15)', border: '1px solid oklch(72% 0.14 155 / 0.40)',
+                    color: 'oklch(30% 0.14 155)',
+                    cursor: analyzing ? 'not-allowed' : 'pointer',
+                    opacity: analyzing ? 0.6 : 1,
+                  }}
+                >
+                  {analyzing ? <Loader size={11} className="spin" /> : <ThumbsUp size={11} />}
+                  {analyzing ? 'Analisando...' : `Analisar acertos selecionados (${nSelected})`}
+                </button>
+              )}
+              <button onClick={load} disabled={loading} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 7, fontSize: 11,
+                background: 'var(--bg-2)', border: '1px solid var(--line-1)',
+                color: 'var(--fg-2)', cursor: 'pointer',
+              }}>
+                <RefreshCw size={10} />
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '8px 14px', fontSize: 12,
+              background: 'oklch(68% 0.20 25 / 0.08)', color: 'oklch(40% 0.20 25)',
+            }}>
+              {error}
+            </div>
+          )}
+
+          {!loading && acertos.length === 0 && (
+            <div style={{ padding: '14px', fontSize: 12, color: 'var(--fg-3)' }}>
+              Nenhum acerto pendente. Use o botão "Foi um acerto" nas violações das avaliações para registrar.
+            </div>
+          )}
+
+          {acertos.map((a, i) => {
+            const isSelected = selectedIds.has(a.id)
+            return (
+              <div key={a.id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                padding: '10px 14px', fontSize: 12,
+                background: isSelected ? 'oklch(72% 0.14 155 / 0.06)' : 'var(--bg-1)',
+                borderTop: i > 0 ? '1px solid var(--line-1)' : 'none',
+              }}>
+                <button
+                  onClick={() => toggleAcerto(a.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', color: 'var(--fg-3)', display: 'flex', flexShrink: 0 }}
+                >
+                  {isSelected
+                    ? <CheckSquare size={14} style={{ color: 'oklch(35% 0.14 155)' }} />
+                    : <Square size={14} />
+                  }
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--fg-1)' }}>{a.regra}</span>
+                    <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>{fmt(a.created_at)}</span>
+                  </div>
+                  {a.citacao && (
+                    <div style={{
+                      fontSize: 11, color: 'var(--fg-3)', fontStyle: 'italic',
+                      padding: '3px 7px', background: 'var(--bg-2)', borderRadius: 4,
+                      borderLeft: '2px solid oklch(72% 0.14 155 / 0.40)', marginBottom: 3,
+                    }}>
+                      "{a.citacao}"
+                    </div>
+                  )}
+                  {a.motivo && (
+                    <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+                      <span style={{ fontWeight: 600 }}>Motivo: </span>{a.motivo}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -1051,6 +1329,9 @@ export default function PromptOptimizer() {
 
       {/* Seção 1: Ranking */}
       <ViolationsRanking onAnalyzeComplete={handleAnalyzeComplete} refreshKey={rankingRefreshKey} />
+
+      {/* Seção 1b: Acertos pendentes */}
+      <AcertosPendentes onAnalyzeComplete={handleAnalyzeComplete} />
 
       {/* Seção 2: Propostas */}
       <ProposalsSection refreshKey={proposalRefreshKey} onVersionChanged={handleVersionChanged} />
