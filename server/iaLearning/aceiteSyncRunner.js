@@ -33,7 +33,7 @@ export async function runOnce(env, trigger = 'manual') {
   currentStartedAt = new Date()
   currentTrigger = trigger
 
-  const WATCHDOG_MIN = 15
+  const WATCHDOG_MIN = Math.max(5, Number(env.IA_LEARNING_ACEITE_SYNC_WATCHDOG_MIN || 30))
   let watchdogFired = false
   const watchdogTimer = setTimeout(() => {
     watchdogFired = true

@@ -15,9 +15,9 @@ import { makeMainSupabase } from './mainSupabaseClient.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const MAX_PAGES = 100
+const DEFAULT_MAX_PAGES = 500 // até 125k eventos (configurável via env)
 const PAGE_LIMIT = 250
-const PAGE_SLEEP_MS = 1500
+const DEFAULT_PAGE_SLEEP_MS = 1000
 const CHUNK_SIZE = 100
 
 export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {
@@ -25,6 +25,8 @@ export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {
   const aceitePipelineId = Number(env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
   const kommoBaseUrl = (env.KOMMO_BASE_URL || '').replace(/\/$/, '')
   const token = env.KOMMO_ACCESS_TOKEN || ''
+  const maxPages = Math.max(1, Number(env.IA_LEARNING_ACEITE_SYNC_MAX_PAGES || DEFAULT_MAX_PAGES))
+  const pageSleepMs = Math.max(200, Number(env.IA_LEARNING_ACEITE_SYNC_PAGE_SLEEP_MS || DEFAULT_PAGE_SLEEP_MS))
 
   if (!kommoBaseUrl || !token) {
     console.error('[IaLearning/aceiteSync] KOMMO_BASE_URL ou KOMMO_ACCESS_TOKEN não configurados — abortando')
@@ -42,15 +44,16 @@ export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {
   const toTs = fromTs + 86399 // 23:59:59
 
   const ddmm = `${String(yesterday.getUTCDate()).padStart(2, '0')}${String(yesterday.getUTCMonth() + 1).padStart(2, '0')}`
-  console.log(`[IaLearning/aceiteSync] iniciando trigger=${trigger} janela=${ddmm}`)
+  console.log(`[IaLearning/aceiteSync] iniciando trigger=${trigger} janela=${ddmm} maxPages=${maxPages} pageSleep=${pageSleepMs}ms`)
 
   const startMs = Date.now()
   const allAceites = []
   let totalEventosRecebidos = 0
   let totalPaginas = 0
   let page = 1
+  let truncatedAtMaxPages = false
 
-  while (page <= MAX_PAGES) {
+  while (page <= maxPages) {
     const url =
       `${kommoBaseUrl}/api/v4/events` +
       `?filter[type]=lead_status_changed` +
@@ -115,14 +118,22 @@ export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {
       )
     })
 
-    console.log(
-      `[IaLearning/aceiteSync] page=${page} recebidos=${items.length} aceites_filtrados=${aceitesDaPagina.length}`,
-    )
+    // Log somente a cada 10 páginas pra não inundar (mas sempre a 1ª e quando filtra aceite)
+    if (page === 1 || page % 10 === 0 || aceitesDaPagina.length > 0) {
+      console.log(
+        `[IaLearning/aceiteSync] page=${page} recebidos=${items.length} aceites_filtrados=${aceitesDaPagina.length} acumulados=${allAceites.length + aceitesDaPagina.length}`,
+      )
+    }
     allAceites.push(...aceitesDaPagina)
 
     if (items.length < PAGE_LIMIT) break // última página
     page++
-    await sleep(PAGE_SLEEP_MS)
+    if (page > maxPages) {
+      truncatedAtMaxPages = true
+      console.warn(`[IaLearning/aceiteSync] ⚠ atingiu maxPages=${maxPages} — possivelmente alguns eventos foram perdidos. Aumente IA_LEARNING_ACEITE_SYNC_MAX_PAGES se necessário.`)
+      break
+    }
+    await sleep(pageSleepMs)
   }
 
   const totalAceites = allAceites.length
@@ -189,5 +200,6 @@ export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {
     totalInseridos,
     totalPaginas,
     durationMs,
+    truncatedAtMaxPages,
   }
 }
