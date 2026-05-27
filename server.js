@@ -357,6 +357,108 @@ app.get('/api/ia-learning/analyze/status', (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Diagnóstico via API Kommo (events): busca eventos de mudança pra aceite num período (default D-1).
+// Independe do nosso banco de eventos — pega DIRETO da fonte. Usa pra detectar
+// se o kommoEventsJob perdeu eventos ou se o detector tem outro problema.
+app.get('/api/ia-learning/aceite-events-direct', async (req, res) => {
+  try {
+    const aceiteStatusId = Number(process.env.KOMMO_ACEITE_STATUS_ID || 48566207)
+    const aceitePipelineId = Number(process.env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
+    const base = (process.env.KOMMO_BASE_URL || '').replace(/\/$/, '')
+    const token = process.env.KOMMO_ACCESS_TOKEN
+    if (!base || !token) return res.status(500).json({ error: 'KOMMO_BASE_URL/ACCESS_TOKEN não configurados' })
+
+    // Janela: query params from/to em ISO (default = ontem 00:00 UTC → ontem 23:59 UTC)
+    const now = new Date()
+    const todayMidnightUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)
+    const defaultFrom = Math.floor((todayMidnightUtcMs - 24 * 3600 * 1000) / 1000)
+    const defaultTo = Math.floor((todayMidnightUtcMs - 1) / 1000)
+    const fromSec = req.query.from ? Math.floor(new Date(req.query.from).getTime() / 1000) : defaultFrom
+    const toSec = req.query.to ? Math.floor(new Date(req.query.to).getTime() / 1000) : defaultTo
+
+    // Pagina /api/v4/events filtrando por type e janela
+    const eventsKommo = []
+    let page = 1
+    const MAX_PAGES = 30 // até 7500 eventos
+    while (page <= MAX_PAGES) {
+      const url = `${base}/api/v4/events?filter[type]=lead_status_changed&filter[created_at][from]=${fromSec}&filter[created_at][to]=${toSec}&page=${page}&limit=250`
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      if (!r.ok) {
+        if (r.status === 204) break
+        return res.status(500).json({ error: `Kommo /events retornou ${r.status} na pág ${page}`, detail: (await r.text()).slice(0, 300) })
+      }
+      const j = await r.json().catch(() => null)
+      const arr = j?._embedded?.events || []
+      eventsKommo.push(...arr)
+      if (arr.length < 250) break
+      page++
+      await new Promise((r) => setTimeout(r, 300))
+    }
+
+    // Filtra os que entraram no aceite
+    const aceiteEvents = eventsKommo.filter((e) => {
+      const va = e?.value_after
+      if (Array.isArray(va) && va[0]?.lead_status) {
+        const ls = va[0].lead_status
+        return Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId
+      }
+      return false
+    })
+    const leadIdsAceite = [...new Set(aceiteEvents.map((e) => Number(e.entity_id)).filter(Boolean))]
+
+    // Confere quais estão no nosso banco
+    const { getFeedbackSupabase } = await import('./server/iaFeedback/supabaseClient.js')
+    const sbFb = getFeedbackSupabase(process.env)
+    let detectadosSet = new Set()
+    if (sbFb && leadIdsAceite.length > 0) {
+      const idsCsv = leadIdsAceite.slice(0, 1000).join(',')
+      const detectados = await sbFb.select('ia_leads_convertidos', `select=lead_id&lead_id=in.(${idsCsv})`)
+      detectadosSet = new Set((detectados || []).map((r) => Number(r.lead_id)))
+    }
+    const naoDetectados = leadIdsAceite.filter((id) => !detectadosSet.has(id))
+
+    // Confere quais estão no nosso kommo_consultor_eventos
+    const { makeMainSupabase } = await import('./server/iaLearning/mainSupabaseClient.js')
+    const sbMain = makeMainSupabase(process.env)
+    let presentesEmKommoEventos = 0
+    let amostraAusentes = []
+    if (sbMain && leadIdsAceite.length > 0) {
+      const fromIso = new Date(fromSec * 1000).toISOString()
+      const toIso = new Date((toSec + 1) * 1000).toISOString()
+      const idsCsv = leadIdsAceite.slice(0, 1000).join(',')
+      const rows = await sbMain.select(
+        'kommo_consultor_eventos',
+        `select=entity_id&event_type=eq.lead_status_changed` +
+        `&entity_id=in.(${idsCsv})` +
+        `&created_at_kommo=gte.${encodeURIComponent(fromIso)}` +
+        `&created_at_kommo=lt.${encodeURIComponent(toIso)}` +
+        `&limit=5000`,
+      )
+      const setNoBanco = new Set((rows || []).map((r) => Number(r.entity_id)))
+      presentesEmKommoEventos = leadIdsAceite.filter((id) => setNoBanco.has(id)).length
+      amostraAusentes = leadIdsAceite.filter((id) => !setNoBanco.has(id)).slice(0, 20)
+    }
+
+    res.json({
+      config: { aceiteStatusId, aceitePipelineId },
+      janela: { from: new Date(fromSec * 1000).toISOString(), to: new Date(toSec * 1000).toISOString() },
+      total_events_kommo_no_periodo: eventsKommo.length,
+      eventos_de_aceite: aceiteEvents.length,
+      leads_unicos_aceite: leadIdsAceite.length,
+      ja_detectados_em_ia_leads_convertidos: detectadosSet.size,
+      nao_detectados: naoDetectados.length,
+      amostra_nao_detectados: naoDetectados.slice(0, 20),
+      // Diagnóstico do sync local
+      presentes_em_kommo_consultor_eventos: presentesEmKommoEventos,
+      perdidos_pelo_sync_local: leadIdsAceite.length - presentesEmKommoEventos,
+      amostra_perdidos_pelo_sync: amostraAusentes,
+    })
+  } catch (e) {
+    console.error('[aceite-events-direct]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Diagnóstico do FUNIL DE ACEITE: compara leads que estão atualmente no status aceite
 // na API do Kommo com o que temos em ia_leads_convertidos. Ajuda a identificar
 // se há gap (leads no Kommo que não detectamos).
