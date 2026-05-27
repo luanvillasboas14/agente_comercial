@@ -1,5 +1,5 @@
 // Scheduler do job de sync de eventos de aceite (sem filtro por consultor).
-// Dispara 1× por dia no minuto :02 da hora IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC (default 12 UTC).
+// Dispara 1× por dia no minuto :02 da hora IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC (default 6 UTC = 03:02 BRT, 1h após o Kommo Events).
 // Watchdog de 15min. Sem reaper externo (1 run/dia, volume baixo).
 //
 // Chave de deduplicação: YYYY-MM-DD-HH (garante 1 disparo por hora-alvo por processo).
@@ -91,7 +91,7 @@ export async function runOnce(env, trigger = 'manual') {
 function tick() {
   if (!scheduledEnv) return
   const now = new Date()
-  const cronHour = Math.max(0, Math.min(23, Number(scheduledEnv.IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC || 12)))
+  const cronHour = Math.max(0, Math.min(23, Number(scheduledEnv.IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC || 6)))
   const hour = now.getUTCHours()
   const minute = now.getUTCMinutes()
 
@@ -131,7 +131,7 @@ export function startAceiteSyncScheduler(env) {
   setInterval(tick, 30 * 1000)
   setTimeout(tick, 2000)
 
-  const cronHour = Math.max(0, Math.min(23, Number(env.IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC || 12)))
+  const cronHour = Math.max(0, Math.min(23, Number(env.IA_LEARNING_ACEITE_SYNC_CRON_HOUR_UTC || 6)))
   console.log(
     `[IaLearning/aceiteSync] Scheduler iniciado (setInterval 30s, dispara no minuto :02 da hora ${cronHour} UTC)`,
   )
