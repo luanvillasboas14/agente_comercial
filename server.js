@@ -358,6 +358,92 @@ app.get('/api/ia-learning/analyze/status', (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Lead-check: investiga um lead específico — todos os eventos lead_status_changed
+// dele no banco principal, registro em ia_leads_convertidos, e diagnóstico do
+// motivo do detector ter ou não pegado.
+app.get('/api/ia-learning/lead-check/:leadId', async (req, res) => {
+  try {
+    const leadId = Number(req.params.leadId)
+    if (!Number.isFinite(leadId) || leadId <= 0) return res.status(400).json({ error: 'leadId inválido' })
+
+    const aceiteStatusId = Number(process.env.KOMMO_ACEITE_STATUS_ID || 48566207)
+    const aceitePipelineId = Number(process.env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
+
+    // 1) Eventos no banco principal
+    const { makeMainSupabase } = await import('./server/iaLearning/mainSupabaseClient.js')
+    const sbMain = makeMainSupabase(process.env)
+    const eventosBanco = sbMain ? await sbMain.select(
+      'kommo_consultor_eventos',
+      `select=kommo_event_id,event_type,created_at_kommo,created_by,raw` +
+      `&entity_id=eq.${leadId}` +
+      `&order=created_at_kommo.desc&limit=50`,
+    ) : []
+
+    const eventosLeadStatus = (Array.isArray(eventosBanco) ? eventosBanco : [])
+      .filter((e) => e.event_type === 'lead_status_changed')
+
+    const eventosAceite = eventosLeadStatus.filter((e) => {
+      const va = e.raw?.value_after
+      if (Array.isArray(va) && va[0]?.lead_status) {
+        const ls = va[0].lead_status
+        return Number(ls.id) === aceiteStatusId && Number(ls.pipeline_id) === aceitePipelineId
+      }
+      return false
+    })
+
+    // 2) Registro em ia_leads_convertidos
+    const { getFeedbackSupabase } = await import('./server/iaFeedback/supabaseClient.js')
+    const sbFb = getFeedbackSupabase(process.env)
+    let leadConvertido = null
+    if (sbFb) {
+      const rows = await sbFb.select(
+        'ia_leads_convertidos',
+        `select=*&lead_id=eq.${leadId}&limit=1`,
+      )
+      leadConvertido = Array.isArray(rows) && rows.length > 0 ? rows[0] : null
+    }
+
+    // 3) Diagnóstico: motivo provável de não ter sido detectado
+    let motivo = null
+    const sevenDaysAgoMs = Date.now() - 7 * 24 * 3600 * 1000
+    const eventosAceiteDentro7d = eventosAceite.filter((e) => new Date(e.created_at_kommo).getTime() >= sevenDaysAgoMs)
+    if (leadConvertido) {
+      motivo = 'OK: já está em ia_leads_convertidos'
+    } else if (eventosAceite.length === 0) {
+      motivo = 'BUG SYNC: nenhum evento de aceite deste lead no kommo_consultor_eventos (kommoEventsJob pulou)'
+    } else if (eventosAceiteDentro7d.length === 0) {
+      motivo = `Aceite mais recente é antigo (>${7} dias): ${eventosAceite[0].created_at_kommo}. Detector busca só 7 dias.`
+    } else {
+      motivo = `MISTÉRIO: ${eventosAceiteDentro7d.length} evento(s) de aceite dentro de 7 dias mas não foi detectado. Talvez detector tenha rodado ANTES desse evento entrar no banco — rode 'Detectar agora' novamente.`
+    }
+
+    res.json({
+      leadId,
+      config: { aceiteStatusId, aceitePipelineId },
+      total_eventos_no_banco: eventosBanco?.length || 0,
+      total_lead_status_changed: eventosLeadStatus.length,
+      total_eventos_aceite: eventosAceite.length,
+      eventos_aceite_dentro_7d: eventosAceiteDentro7d.length,
+      ja_em_ia_leads_convertidos: !!leadConvertido,
+      motivo_provavel: motivo,
+      lead_convertido: leadConvertido,
+      eventos_aceite: eventosAceite.map((e) => ({
+        event_id: e.kommo_event_id,
+        at: e.created_at_kommo,
+        by: e.created_by,
+        value_after: e.raw?.value_after,
+      })),
+      todos_status_changed: eventosLeadStatus.slice(0, 20).map((e) => ({
+        at: e.created_at_kommo,
+        va: e.raw?.value_after,
+      })),
+    })
+  } catch (e) {
+    console.error('[lead-check]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Diagnóstico via API Kommo (events): busca eventos de mudança pra aceite num período (default D-1).
 // Independe do nosso banco de eventos — pega DIRETO da fonte. Usa pra detectar
 // se o kommoEventsJob perdeu eventos ou se o detector tem outro problema.
@@ -380,7 +466,7 @@ app.get('/api/ia-learning/aceite-events-direct', async (req, res) => {
     // Pagina /api/v4/events filtrando por type e janela
     const eventsKommo = []
     let page = 1
-    const MAX_PAGES = 30 // até 7500 eventos
+    const MAX_PAGES = 100 // até 25k eventos (cobre dias muito ativos)
     while (page <= MAX_PAGES) {
       const url = `${base}/api/v4/events?filter[type]=lead_status_changed&filter[created_at][from]=${fromSec}&filter[created_at][to]=${toSec}&page=${page}&limit=250`
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
