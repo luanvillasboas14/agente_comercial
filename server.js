@@ -357,6 +357,65 @@ app.get('/api/ia-learning/analyze/status', (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Diagnóstico do FUNIL DE ACEITE: compara leads que estão atualmente no status aceite
+// na API do Kommo com o que temos em ia_leads_convertidos. Ajuda a identificar
+// se há gap (leads no Kommo que não detectamos).
+app.get('/api/ia-learning/aceite-check', async (_req, res) => {
+  try {
+    const aceiteStatusId = Number(process.env.KOMMO_ACEITE_STATUS_ID || 48566207)
+    const aceitePipelineId = Number(process.env.KOMMO_ACEITE_PIPELINE_ID || 5481944)
+    const base = (process.env.KOMMO_BASE_URL || '').replace(/\/$/, '')
+    const token = process.env.KOMMO_ACCESS_TOKEN
+    if (!base || !token) return res.status(500).json({ error: 'KOMMO_BASE_URL/ACCESS_TOKEN não configurados' })
+
+    // Pagina leads no status aceite
+    const leadsKommo = []
+    let page = 1
+    const MAX_PAGES = 10 // até 2500 leads
+    while (page <= MAX_PAGES) {
+      const url = `${base}/api/v4/leads?filter[statuses][0][pipeline_id]=${aceitePipelineId}&filter[statuses][0][status_id]=${aceiteStatusId}&page=${page}&limit=250`
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
+      if (!r.ok) {
+        if (r.status === 204) break // sem conteúdo = sem mais leads
+        return res.status(500).json({ error: `Kommo retornou ${r.status} na página ${page}`, detail: (await r.text()).slice(0, 300) })
+      }
+      const j = await r.json().catch(() => null)
+      const arr = j?._embedded?.leads || []
+      leadsKommo.push(...arr.map((l) => ({ id: l.id, name: l.name, created_at: l.created_at, updated_at: l.updated_at })))
+      if (arr.length < 250) break
+      page++
+      await new Promise((r) => setTimeout(r, 250)) // rate limit suave
+    }
+
+    // Compara com ia_leads_convertidos
+    const { getFeedbackSupabase } = await import('./server/iaFeedback/supabaseClient.js')
+    const sb = getFeedbackSupabase(process.env)
+    const idsKommo = leadsKommo.map((l) => Number(l.id)).filter(Boolean)
+    let detectadosSet = new Set()
+    if (sb && idsKommo.length > 0) {
+      const idsCsv = idsKommo.slice(0, 1000).join(',')
+      const detectados = await sb.select('ia_leads_convertidos', `select=lead_id&lead_id=in.(${idsCsv})`)
+      detectadosSet = new Set((detectados || []).map((r) => Number(r.lead_id)))
+    }
+    const naoDetectados = leadsKommo.filter((l) => !detectadosSet.has(Number(l.id)))
+
+    res.json({
+      config: { aceiteStatusId, aceitePipelineId },
+      total_kommo_no_status_aceite: leadsKommo.length,
+      total_detectados_no_banco: detectadosSet.size,
+      total_nao_detectados: naoDetectados.length,
+      amostra_nao_detectados: naoDetectados.slice(0, 20).map((l) => ({
+        id: l.id, name: l.name,
+        created_at_iso: l.created_at ? new Date(l.created_at * 1000).toISOString() : null,
+        updated_at_iso: l.updated_at ? new Date(l.updated_at * 1000).toISOString() : null,
+      })),
+    })
+  } catch (e) {
+    console.error('[aceite-check]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Diagnóstico do DETECTOR: investiga por que poucos aceites novos foram encontrados.
 // Conta eventos por dia, valida estrutura do raw, mostra amostras.
 app.get('/api/ia-learning/detector-diagnostic', async (_req, res) => {
