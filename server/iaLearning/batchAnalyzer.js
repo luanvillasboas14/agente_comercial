@@ -253,6 +253,21 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
       activeVersionId = av?.id || null
     } catch (_) {}
 
+    if (!activeVersionId && regrasAceitas.length > 0) {
+      throw new Error(
+        '[IaLearning/analyzer] Não existe versão ativa de prompt em ia_prompt_versions. ' +
+        'Configure pelo menos uma versão ativa antes de rodar o analyzer (ia_prompt_proposals.baseada_em_versao_id é NOT NULL).',
+      )
+    }
+
+    // Janela do batch = primeiro e último lead processado (ou now() como fallback).
+    // O schema original do iaFeedback exige janela_de e janela_ate NOT NULL —
+    // pro analyzer de aprendizado positivo essa janela representa o intervalo
+    // de conversões aprendidas.
+    const detectedAts = leadsParaBatch.map((l) => l.detectado_em || l.created_at).filter(Boolean).sort()
+    const janelaDe = detectedAts[0] || new Date().toISOString()
+    const janelaAte = detectedAts[detectedAts.length - 1] || new Date().toISOString()
+
     let regrasInseridas = 0
     let primeiroErroInsert = null
     for (const r of regrasAceitas) {
@@ -265,6 +280,8 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
           conflitos_potenciais: null,
           exemplos_violacoes: [],
           total_violacoes: 0,
+          janela_de: janelaDe,
+          janela_ate: janelaAte,
           status: 'pendente',
           modelo_analisador: modelo,
           tipo_mudanca: r.trecho_antes ? 'ajuste' : 'novo_exemplo',
