@@ -4,6 +4,7 @@ import {
   loadConvertidosRecentes,
   triggerBatchAnalysis,
   loadBatches,
+  getBatchDetail,
   loadExamples,
   activateExample,
   rejectExample,
@@ -246,9 +247,90 @@ function TabConversoes({ status, recentes, onAnalyze, onDetectNow, onSyncAceites
 
 // ─── Sub-tab Batches ──────────────────────────────────────────────────────────
 
+function BatchDetailModal({ batchId, onClose }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getBatchDetail(batchId)
+      .then((d) => { if (!cancelled) setData(d) })
+      .catch((e) => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
+  }, [batchId])
+
+  let parsed = null
+  let parseErr = null
+  if (data?.raw_analyzer_response) {
+    try {
+      let txt = String(data.raw_analyzer_response).trim()
+      const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/)
+      if (fence) txt = fence[1].trim()
+      parsed = JSON.parse(txt)
+    } catch (e) { parseErr = e.message }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--line-1)', borderRadius: 8, maxWidth: 900, maxHeight: '85vh', width: '100%', overflow: 'auto', padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 14, color: 'var(--fg-1)' }}>Detalhes do batch {batchId.slice(0, 8)}…</h3>
+          <button className="btn btn-sm" onClick={onClose}>Fechar</button>
+        </div>
+        {error && <div style={{ color: '#f87171', fontSize: 12, marginBottom: 12 }}>Erro: {error}</div>}
+        {!data && !error && <div style={{ color: 'var(--fg-3)', fontSize: 12 }}>Carregando...</div>}
+        {data && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 16, fontSize: 12 }}>
+              <div><span style={{ color: 'var(--fg-3)' }}>Status:</span> <StatusBadge status={data.status} /></div>
+              <div><span style={{ color: 'var(--fg-3)' }}>Leads:</span> {data.total_leads}</div>
+              <div><span style={{ color: 'var(--fg-3)' }}>Propostas salvas:</span> {data.total_propostas_geradas}</div>
+              <div><span style={{ color: 'var(--fg-3)' }}>Propostas descartadas:</span> {data.total_propostas_descartadas}</div>
+              <div><span style={{ color: 'var(--fg-3)' }}>Exemplos:</span> {data.total_exemplos_gerados}</div>
+              <div><span style={{ color: 'var(--fg-3)' }}>Modelo:</span> {data.modelo_analisador}</div>
+            </div>
+            {data.error_message && (
+              <div style={{ background: '#7f1d1d', color: '#fee2e2', padding: 12, borderRadius: 6, fontSize: 12, marginBottom: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                <strong>Erro:</strong> {data.error_message}
+              </div>
+            )}
+            {parsed && (
+              <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-2)', borderRadius: 6, fontSize: 12 }}>
+                <div style={{ color: 'var(--fg-2)', marginBottom: 6 }}>
+                  <strong>Resposta parseada do o3-mini:</strong>
+                </div>
+                <div style={{ color: 'var(--fg-2)' }}>
+                  • <strong>regras_propostas</strong>: {Array.isArray(parsed.regras_propostas) ? parsed.regras_propostas.length : '?'} item(ns)
+                </div>
+                <div style={{ color: 'var(--fg-2)' }}>
+                  • <strong>exemplos_extraidos</strong>: {Array.isArray(parsed.exemplos_extraidos) ? parsed.exemplos_extraidos.length : '?'} item(ns)
+                </div>
+                {Array.isArray(parsed.regras_propostas) && parsed.regras_propostas.length > 0 && (
+                  <div style={{ marginTop: 8, color: 'var(--fg-3)', fontSize: 11 }}>
+                    Support counts: {parsed.regras_propostas.map((r) => r.support_count).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
+            {parseErr && (
+              <div style={{ color: '#fbbf24', fontSize: 12, marginBottom: 12 }}>JSON inválido na resposta: {parseErr}</div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 4 }}>Resposta bruta do modelo:</div>
+            <pre style={{ background: 'var(--bg-2)', padding: 12, borderRadius: 6, fontSize: 11, maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--fg-2)' }}>
+              {data.raw_analyzer_response || '(sem resposta salva)'}
+            </pre>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function TabBatches({ batches, loading }) {
+  const [selectedBatchId, setSelectedBatchId] = useState(null)
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {selectedBatchId && <BatchDetailModal batchId={selectedBatchId} onClose={() => setSelectedBatchId(null)} />}
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line-1)', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)' }}>
         Histórico de batches
       </div>
@@ -261,7 +343,7 @@ function TabBatches({ batches, loading }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--line-1)' }}>
-                {['ID', 'Trigger', 'Status', 'Leads', 'Prop. geradas', 'Ex. gerados', 'Iniciado', 'Finalizado'].map((h) => (
+                {['ID', 'Trigger', 'Status', 'Leads', 'Prop. geradas', 'Ex. gerados', 'Iniciado', 'Finalizado', ''].map((h) => (
                   <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--fg-3)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -281,6 +363,9 @@ function TabBatches({ batches, loading }) {
                   </td>
                   <td style={{ padding: '8px 12px', color: 'var(--fg-2)', whiteSpace: 'nowrap' }}>{fmt(b.created_at)}</td>
                   <td style={{ padding: '8px 12px', color: 'var(--fg-2)', whiteSpace: 'nowrap' }}>{b.finished_at ? fmt(b.finished_at) : '-'}</td>
+                  <td style={{ padding: '8px 12px' }}>
+                    <button className="btn btn-sm" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSelectedBatchId(b.id)}>Detalhes</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
