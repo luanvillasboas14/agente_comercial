@@ -12,7 +12,9 @@ export function isProposalObsolete(proposal, activeAgentRulesText) {
   if (!proposal || !activeAgentRulesText) return false
   if (proposal.tipo_mudanca === 'nenhuma') return false
   if (proposal.status !== 'pendente') return false
-  if (!proposal.trecho_antes) return true
+  // Propostas de adição (sem trecho_antes) nunca ficam obsoletas — são
+  // anexadas como nova seção do prompt. Tipicamente origem=aprendizado_positivo.
+  if (!proposal.trecho_antes) return false
   return !activeAgentRulesText.includes(proposal.trecho_antes)
 }
 
