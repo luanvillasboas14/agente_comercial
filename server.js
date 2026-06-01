@@ -2721,12 +2721,25 @@ app.post('/api/ia-feedback/proposals/:id/accept', async (req, res) => {
     if (!activeVersion) return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
 
     const activeText = activeVersion.agent_rules_text
-    const novoTexto = activeText.split(proposal.trecho_antes).join(proposal.trecho_depois)
+    const trechoAntes = String(proposal.trecho_antes || '')
+    const trechoDepois = String(proposal.trecho_depois || '')
 
-    if (novoTexto === activeText) {
-      return res.status(400).json({
-        error: 'trecho_antes não casa mais no prompt ativo — proposta desatualizada por uma versão posterior. Rejeite e rode análise nova.',
-      })
+    let novoTexto
+    if (!trechoAntes.trim()) {
+      // Adição (proposta de aprendizado_positivo / novo_exemplo): anexa ao final
+      // como nova seção, preservando o prompt existente intacto.
+      if (!trechoDepois.trim()) {
+        return res.status(400).json({ error: 'Proposta sem trecho_antes nem trecho_depois — nada para aplicar.' })
+      }
+      const header = `\n\n# ${proposal.regra_alvo || 'NOVA REGRA'}\n`
+      novoTexto = `${activeText.trimEnd()}${header}${trechoDepois}\n`
+    } else {
+      novoTexto = activeText.split(trechoAntes).join(trechoDepois)
+      if (novoTexto === activeText) {
+        return res.status(400).json({
+          error: 'trecho_antes não casa mais no prompt ativo — proposta desatualizada por uma versão posterior. Rejeite e rode análise nova.',
+        })
+      }
     }
 
     const newVersion = await createVersionAndActivate(process.env, {
