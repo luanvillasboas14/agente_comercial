@@ -194,6 +194,46 @@ app.post('/api/kommo-events/run-now', async (req, res) => {
   }
 })
 
+// Busca usuários do Kommo por nome (substring case-insensitive).
+// Uso: GET /api/kommo-events/users-search?q=jessyca,sabrina,felipe
+app.get('/api/kommo-events/users-search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    if (!q) return res.status(400).json({ error: 'parametro q obrigatorio (lista separada por virgula)' })
+    const termos = q.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    if (termos.length === 0) return res.status(400).json({ error: 'nenhum termo de busca' })
+
+    const baseUrl = (process.env.KOMMO_BASE_URL || '').replace(/\/$/, '')
+    const token = process.env.KOMMO_ACCESS_TOKEN || ''
+    if (!baseUrl || !token) return res.status(500).json({ error: 'KOMMO_BASE_URL / KOMMO_ACCESS_TOKEN ausentes' })
+
+    const todos = []
+    for (let page = 1; page <= 10; page++) {
+      const url = `${baseUrl}/api/v4/users?limit=250&page=${page}`
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!r.ok) {
+        if (r.status === 204) break
+        const txt = await r.text().catch(() => '')
+        return res.status(r.status).json({ error: `Kommo ${r.status}`, body: txt.slice(0, 300) })
+      }
+      const data = await r.json().catch(() => ({}))
+      const items = data?._embedded?.users || []
+      todos.push(...items.map((u) => ({ id: u.id, nome: u.name, email: u.email, rights_admin: u?.rights?.is_admin })))
+      if (items.length < 250) break
+    }
+
+    const matches = todos.filter((u) => {
+      const nomeLower = String(u.nome || '').toLowerCase()
+      return termos.some((t) => nomeLower.includes(t))
+    })
+
+    res.json({ termos, total_usuarios: todos.length, matches })
+  } catch (e) {
+    console.error('[kommo-events/users-search]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/kommo-events/metrics', async (req, res) => {
   try {
     const date = String(req.query.date || '').trim()
