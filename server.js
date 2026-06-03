@@ -234,6 +234,70 @@ app.get('/api/kommo-events/users-search', async (req, res) => {
   }
 })
 
+// Diagnostica eventos de um usuario especifico no Kommo para uma data.
+// Uso: GET /api/kommo-events/user-events?user_id=14482884&date=2026-06-02
+// Compara com o que esta gravado em kommo_consultor_eventos.
+app.get('/api/kommo-events/user-events', async (req, res) => {
+  try {
+    const userId = Number(req.query.user_id || 0)
+    const date = String(req.query.date || '').trim()
+    if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'use ?user_id=<id>&date=YYYY-MM-DD' })
+    }
+
+    const baseUrl = (process.env.KOMMO_BASE_URL || '').replace(/\/$/, '')
+    const token = process.env.KOMMO_ACCESS_TOKEN || ''
+    if (!baseUrl || !token) return res.status(500).json({ error: 'KOMMO_BASE_URL / KOMMO_ACCESS_TOKEN ausentes' })
+
+    // janela do dia em UTC (mesma logica do job)
+    const fromUnix = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000)
+    const toUnix = fromUnix + 24 * 3600 - 1
+
+    let totalKommo = 0
+    let porTipo = {}
+    for (let page = 1; page <= 20; page++) {
+      const params = new URLSearchParams({
+        'filter[created_at][from]': String(fromUnix),
+        'filter[created_at][to]': String(toUnix),
+        'filter[created_by]': String(userId),
+        limit: '250',
+        page: String(page),
+      })
+      const url = `${baseUrl}/api/v4/events?${params.toString()}`
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (r.status === 204) break
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '')
+        return res.status(r.status).json({ error: `Kommo ${r.status}`, body: txt.slice(0, 300) })
+      }
+      const data = await r.json().catch(() => ({}))
+      const items = data?._embedded?.events || []
+      totalKommo += items.length
+      for (const ev of items) {
+        porTipo[ev.type] = (porTipo[ev.type] || 0) + 1
+      }
+      if (items.length < 250) break
+    }
+
+    // Conta na nossa tabela tambem
+    const sbUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '')
+    const sbKey = process.env.SUPABASE_KEY || ''
+    let totalDb = null
+    if (sbUrl && sbKey) {
+      const u = `${sbUrl}/rest/v1/kommo_consultor_eventos?select=count&consultor_id=eq.${userId}&created_at_kommo=gte.${date}T00:00:00Z&created_at_kommo=lt.${date}T23:59:59Z`
+      const r = await fetch(u, { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}`, Prefer: 'count=exact' } })
+      const range = r.headers.get('content-range') || ''
+      const m = range.match(/\/(\d+)/)
+      totalDb = m ? Number(m[1]) : null
+    }
+
+    res.json({ user_id: userId, date, kommo_eventos: totalKommo, banco_eventos: totalDb, por_tipo: porTipo })
+  } catch (e) {
+    console.error('[kommo-events/user-events]', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/kommo-events/metrics', async (req, res) => {
   try {
     const date = String(req.query.date || '').trim()
