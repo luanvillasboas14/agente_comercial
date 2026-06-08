@@ -108,6 +108,33 @@ export async function markProposalApplied(env, id, resultadoVersaoId) {
 }
 
 /**
+ * Lista regra_alvo de propostas passadas (aplicadas e rejeitadas) para
+ * usar como blocklist no analyzer de aprendizado positivo.
+ * Retorna { aplicadas: string[], rejeitadas: string[] }.
+ */
+export async function listPastProposalRules(env, { origem = null, limit = 500 } = {}) {
+  const sb = getClient(env)
+  try {
+    let query = `select=regra_alvo,trecho_depois,status&status=in.(aplicada,rejeitada)&order=created_at.desc&limit=${Math.min(1000, limit)}`
+    if (origem) query += `&origem=eq.${encodeURIComponent(origem)}`
+    const rows = await sb.select('ia_prompt_proposals', query)
+    const list = Array.isArray(rows) ? rows : []
+    const aplicadas = []
+    const rejeitadas = []
+    for (const r of list) {
+      const entry = { regra_alvo: String(r.regra_alvo || '').trim(), trecho_depois: String(r.trecho_depois || '').trim() }
+      if (!entry.regra_alvo) continue
+      if (r.status === 'aplicada') aplicadas.push(entry)
+      else if (r.status === 'rejeitada') rejeitadas.push(entry)
+    }
+    return { aplicadas, rejeitadas }
+  } catch (err) {
+    console.warn(`[proposalsStore] listPastProposalRules falhou: ${err.message}`)
+    return { aplicadas: [], rejeitadas: [] }
+  }
+}
+
+/**
  * Marca uma proposta como 'rejeitada'.
  */
 export async function markProposalRejected(env, id) {

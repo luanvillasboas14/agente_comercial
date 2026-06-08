@@ -9,6 +9,18 @@ import { createExample } from './examplesStore.js'
 import { getFeedbackSupabase } from '../iaFeedback/supabaseClient.js'
 import { resolveModel } from '../ai/modelRegistry.js'
 import { getActiveVersion } from '../iaFeedback/promptVersionStore.js'
+import { listPastProposalRules } from '../iaFeedback/proposalsStore.js'
+
+// Normaliza texto pra comparação fuzzy: lowercase, sem acentos, sem pontuação,
+// espaços colapsados. Usado pra bater regra_alvo contra blocklist.
+function normRule(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[—–\-_:.,;()\[\]"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 /**
  * Trunca a conversa a um máximo de caracteres por conversa.
@@ -31,7 +43,7 @@ function truncateConversa(mensagens, maxChars = 2000) {
 /**
  * Monta o prompt do sistema para o analyzer.
  */
-function buildAnalyzerPrompt(leadsData, { minSupport, minQuality, minExamples, maxExamples }) {
+function buildAnalyzerPrompt(leadsData, { minSupport, minQuality, minExamples, maxExamples, regrasJaAplicadas = [], regrasJaRejeitadas = [] }) {
   const batchText = leadsData.map((ld, i) => {
     const snap = ld.conversa_snapshot || {}
     const msgs = Array.isArray(snap.mensagens) ? snap.mensagens : []
@@ -39,11 +51,18 @@ function buildAnalyzerPrompt(leadsData, { minSupport, minQuality, minExamples, m
     return `[${i + 1}] lead_id=${ld.lead_id} consultor=${ld.consultor_nome || 'desconhecido'} total_msgs=${ld.total_mensagens}\n${transcricao || '  (sem mensagens)'}`
   }).join('\n\n')
 
+  const blocklistAplicadas = regrasJaAplicadas.length > 0
+    ? `\n\nREGRAS JÁ EXISTENTES NO PROMPT (NÃO PROPOR DE NOVO — variações disfarçadas também NÃO valem):\n${regrasJaAplicadas.map((r) => `- ${r}`).join('\n')}`
+    : ''
+  const blocklistRejeitadas = regrasJaRejeitadas.length > 0
+    ? `\n\nREGRAS JÁ REJEITADAS PELO HUMANO (NÃO PROPOR DE NOVO — o humano já decidiu que essas não servem):\n${regrasJaRejeitadas.map((r) => `- ${r}`).join('\n')}`
+    : ''
+
   return {
     system: `Você é um analista que estuda conversas REAIS entre consultores humanos e leads que CONVERTERAM (compraram o curso).
 Seu objetivo é extrair APRENDIZADO POSITIVO pra melhorar uma IA de atendimento.
 
-Você recebe um BATCH de ${leadsData.length} conversas. Analise TODAS antes de propor.
+Você recebe um BATCH de ${leadsData.length} conversas. Analise TODAS antes de propor.${blocklistAplicadas}${blocklistRejeitadas}
 
 META DE QUANTIDADE (importante):
 - Você DEVE extrair entre ${minExamples} e ${maxExamples} exemplos no total.
@@ -79,6 +98,7 @@ Você deve retornar exatamente este JSON:
 }
 
 REGRAS DURAS:
+- NÃO proponha regras que já estão no prompt (lista acima) nem regras já rejeitadas. Compare semanticamente, não só pelo título.
 - NÃO invente padrões. Só proponha se apareceu em >= ${minSupport} conversas.
 - NÃO altere regras críticas (transferência humana, dados sensíveis, preços específicos).
 - Cada exemplo deve ser AUTOCONTIDO (2-6 turnos), formatação preservada (incluindo emojis).
@@ -156,11 +176,20 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
   let rawJson = null
 
   try {
-    // 4) Monta prompt
+    // 4) Monta prompt — inclui blocklist de regras já aplicadas/rejeitadas
+    //    pra evitar repetir o que o humano já decidiu.
+    const pastRules = await listPastProposalRules(env, { origem: 'aprendizado_positivo', limit: 500 })
+    const regrasJaAplicadas = pastRules.aplicadas.map((r) => r.regra_alvo)
+    const regrasJaRejeitadas = pastRules.rejeitadas.map((r) => r.regra_alvo)
+    console.log(`[IaLearning] analyzer: blocklist — aplicadas=${regrasJaAplicadas.length} rejeitadas=${regrasJaRejeitadas.length}`)
+
     // Resolve metas de quantidade de exemplos baseado no tamanho real do batch
     const minExamples = minExamplesEnv > 0 ? minExamplesEnv : 2
     const maxExamples = maxExamplesEnv > 0 ? maxExamplesEnv : Math.max(5, Math.ceil(leadsParaBatch.length / 10))
-    const { system, user } = buildAnalyzerPrompt(leadsParaBatch, { minSupport, minQuality, minExamples, maxExamples })
+    const { system, user } = buildAnalyzerPrompt(leadsParaBatch, {
+      minSupport, minQuality, minExamples, maxExamples,
+      regrasJaAplicadas, regrasJaRejeitadas,
+    })
     console.log(`[IaLearning] analyzer: meta exemplos = entre ${minExamples} e ${maxExamples} (batch=${leadsParaBatch.length})`)
 
     // 5) Chama OpenAI via fetch direto (padrão do projeto, sem SDK)
@@ -232,9 +261,27 @@ export async function runBatchAnalysis(env, { trigger = 'manual', limit = null }
     const regrasBrutas = Array.isArray(parsed.regras_propostas) ? parsed.regras_propostas : []
     const exemplosBrutos = Array.isArray(parsed.exemplos_extraidos) ? parsed.exemplos_extraidos : []
 
-    // 7) Filtra por support_count e quality_score
-    const regrasAceitas = regrasBrutas.filter((r) => Number(r.support_count) >= minSupport)
+    // 7) Filtra por support_count, quality_score E blocklist (regras já decididas)
+    const blocklistSet = new Set([
+      ...regrasJaAplicadas.map(normRule),
+      ...regrasJaRejeitadas.map(normRule),
+    ])
+    const regrasAceitas = []
+    let regrasBloqueadasPorHistorico = 0
+    for (const r of regrasBrutas) {
+      if (Number(r.support_count) < minSupport) continue
+      const chave = normRule(r.regra_alvo)
+      if (chave && blocklistSet.has(chave)) {
+        regrasBloqueadasPorHistorico++
+        console.log(`[IaLearning] analyzer: regra "${r.regra_alvo}" bloqueada (já aplicada/rejeitada)`)
+        continue
+      }
+      regrasAceitas.push(r)
+    }
     const regrasDescartadas = regrasBrutas.length - regrasAceitas.length
+    if (regrasBloqueadasPorHistorico > 0) {
+      console.log(`[IaLearning] analyzer: ${regrasBloqueadasPorHistorico} regras descartadas por bloqueio de histórico`)
+    }
     const exemplosAceitos = exemplosBrutos.filter((e) => Number(e.qualidade_score) >= minQuality)
     const exemplosDescartados = exemplosBrutos.length - exemplosAceitos.length
 
