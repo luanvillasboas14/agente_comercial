@@ -678,6 +678,11 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
   const [analyzeError, setAnalyzeError] = useState(null)
   // violation IDs no formato "feedbackId:regra"
   const [selectedViolationIds, setSelectedViolationIds] = useState(new Set())
+  // Filtro de severidade: 'alta' (default — só casos sérios), 'media' (alta+media), 'todas'
+  const [sevFilter, setSevFilter] = useState(() => {
+    try { return localStorage.getItem('po_sev_filter') || 'alta' } catch { return 'alta' }
+  })
+  useEffect(() => { try { localStorage.setItem('po_sev_filter', sevFilter) } catch {} }, [sevFilter])
 
   async function load() {
     setLoading(true)
@@ -739,6 +744,41 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
 
   const nSelected = selectedViolationIds.size
 
+  // Aplica filtro de severidade no ranking carregado.
+  // 'alta'  → regras com pelo menos 1 violação ALTA
+  // 'media' → regras com pelo menos 1 violação ALTA ou MÉDIA
+  // 'todas' → todas
+  const rankingFiltrado = (() => {
+    if (!ranking) return null
+    const rule = (it) => {
+      const s = it.severidades || { alta: 0, media: 0, baixa: 0 }
+      if (sevFilter === 'alta') return (s.alta || 0) > 0
+      if (sevFilter === 'media') return (s.alta || 0) + (s.media || 0) > 0
+      return true
+    }
+    return { ...ranking, ranking: ranking.ranking.filter(rule) }
+  })()
+  const totalOriginal = ranking?.ranking?.length || 0
+  const totalFiltrado = rankingFiltrado?.ranking?.length || 0
+
+  function SevBtn({ value, label }) {
+    const active = sevFilter === value
+    return (
+      <button
+        onClick={() => setSevFilter(value)}
+        style={{
+          padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+          background: active ? 'oklch(60% 0.18 240 / 0.18)' : 'var(--bg-1)',
+          border: `1px solid ${active ? 'oklch(60% 0.18 240 / 0.45)' : 'var(--line-1)'}`,
+          color: active ? 'oklch(35% 0.18 240)' : 'var(--fg-2)',
+          cursor: 'pointer',
+        }}
+      >
+        {label}
+      </button>
+    )
+  }
+
   return (
     <div style={{
       padding: '16px 18px', borderRadius: 12,
@@ -748,7 +788,13 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)' }}>
           Ranking de violações na janela atual
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginRight: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.04, marginRight: 4 }}>Severidade:</span>
+            <SevBtn value="alta" label="Alta" />
+            <SevBtn value="media" label="Alta + Média" />
+            <SevBtn value="todas" label="Todas" />
+          </div>
           {nSelected > 0 && (
             <button
               onClick={handleAnalyzeMulti}
@@ -785,6 +831,11 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
       {ranking && (
         <div style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 12 }}>
           Janela: {fmt(ranking.janela_de)} → {fmt(ranking.janela_ate)} · {ranking.total_avaliacoes} avaliações · v{ranking.versao_ativa?.versao}
+          {sevFilter !== 'todas' && totalOriginal !== totalFiltrado && (
+            <span style={{ marginLeft: 8, color: 'var(--fg-2)' }}>
+              · mostrando {totalFiltrado} de {totalOriginal} regras (filtro: {sevFilter === 'alta' ? 'Alta' : 'Alta + Média'})
+            </span>
+          )}
         </div>
       )}
 
@@ -820,7 +871,13 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
         </div>
       )}
 
-      {ranking && ranking.ranking.length > 0 && (
+      {ranking && ranking.ranking.length > 0 && rankingFiltrado.ranking.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--fg-3)', padding: '12px 0' }}>
+          Nenhuma violação <strong>{sevFilter === 'alta' ? 'de severidade alta' : 'alta ou média'}</strong> na janela atual ({totalOriginal} regra(s) escondida(s) pelo filtro). Clique em "Todas" pra ver tudo.
+        </div>
+      )}
+
+      {rankingFiltrado && rankingFiltrado.ranking.length > 0 && (
         <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden' }}>
           {/* Header da tabela */}
           <div style={{
@@ -836,7 +893,7 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
             <span>Ações</span>
           </div>
 
-          {ranking.ranking.map((item, i) => (
+          {rankingFiltrado.ranking.map((item, i) => (
             <div key={item.regra} style={{ borderTop: i > 0 ? '1px solid var(--line-1)' : 'none' }}>
               <div style={{
                 display: 'grid', gridTemplateColumns: '24px 1fr 80px 160px auto',
