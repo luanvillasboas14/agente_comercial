@@ -354,9 +354,19 @@ export async function analyzeRule(env, { regraAlvo, ranking, activeVersion, inst
   }
 
   if (proposal.tipo_mudanca !== 'nenhuma') {
-    if (!proposal.trecho_antes) {
+    const trechoAntes = String(proposal.trecho_antes || '').trim()
+    const trechoDepois = String(proposal.trecho_depois || '').trim()
+
+    // novo_exemplo (adição) pode vir sem trecho_antes — é anexado ao final
+    // do prompt pelo /accept. Só precisa ter trecho_depois.
+    if (!trechoAntes && proposal.tipo_mudanca === 'novo_exemplo') {
+      if (!trechoDepois) {
+        throw new Error('[analyzer/validation] novo_exemplo precisa de trecho_depois preenchido')
+      }
+      // OK — addition válida
+    } else if (!trechoAntes) {
       throw new Error('[analyzer/validation] trecho_antes vazio na proposta')
-    }
+    } else {
     const found = findFlexibleMatch(agentRulesText, proposal.trecho_antes)
     if (!found) {
       console.error(
@@ -371,6 +381,7 @@ export async function analyzeRule(env, { regraAlvo, ranking, activeVersion, inst
         `[analyzer/validation] trecho_antes ajustado via match flexível (whitespace normalizado). Modelo original: "${proposal.trecho_antes.slice(0, 80)}..." → trecho real: "${found.match.slice(0, 80)}..."`,
       )
       proposal.trecho_antes = found.match
+    }
     }
   }
 
@@ -530,17 +541,25 @@ function validateAndNormalizeProposal(proposal, agentRulesText) {
   }
 
   if (proposal.tipo_mudanca !== 'nenhuma') {
-    if (!proposal.trecho_antes) {
+    const trechoAntes = String(proposal.trecho_antes || '').trim()
+    const trechoDepois = String(proposal.trecho_depois || '').trim()
+
+    if (!trechoAntes && proposal.tipo_mudanca === 'novo_exemplo') {
+      if (!trechoDepois) {
+        throw new Error('[analyzer/validation] novo_exemplo precisa de trecho_depois preenchido')
+      }
+    } else if (!trechoAntes) {
       throw new Error('[analyzer/validation] trecho_antes vazio na proposta')
-    }
-    const found = findFlexibleMatch(agentRulesText, proposal.trecho_antes)
-    if (!found) {
-      throw new Error(
-        `[analyzer/validation] trecho_antes não encontrado no prompt ativo para "${proposal.regra_alvo}". O modelo parafraseou — tente reanalisar.`,
-      )
-    }
-    if (!found.exact) {
-      proposal.trecho_antes = found.match
+    } else {
+      const found = findFlexibleMatch(agentRulesText, proposal.trecho_antes)
+      if (!found) {
+        throw new Error(
+          `[analyzer/validation] trecho_antes não encontrado no prompt ativo para "${proposal.regra_alvo}". O modelo parafraseou — tente reanalisar.`,
+        )
+      }
+      if (!found.exact) {
+        proposal.trecho_antes = found.match
+      }
     }
   }
 
