@@ -900,19 +900,37 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
                 alignItems: 'center', padding: '10px 14px',
                 background: expandedRegra === item.regra ? 'oklch(60% 0.10 265 / 0.05)' : 'transparent',
               }}>
-                {/* Checkbox da regra (seleciona o primeiro exemplo) */}
-                {item.exemplos.length > 0 ? (
-                  <button
-                    onClick={() => toggleViolation(item.exemplos[0].feedback_id, item.regra)}
-                    title="Selecionar principal violação desta regra"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--fg-3)', display: 'flex' }}
-                  >
-                    {selectedViolationIds.has(makeViolationId(item.exemplos[0].feedback_id, item.regra))
-                      ? <CheckSquare size={14} style={{ color: 'oklch(35% 0.18 240)' }} />
-                      : <Square size={14} />
-                    }
-                  </button>
-                ) : <span />}
+                {/* Checkbox da regra — seleciona/desseleciona TODOS os exemplos da regra */}
+                {item.exemplos.length > 0 ? (() => {
+                  const ids = item.exemplos.map((ex) => makeViolationId(ex.feedback_id, item.regra))
+                  const allSelected = ids.every((id) => selectedViolationIds.has(id))
+                  const someSelected = !allSelected && ids.some((id) => selectedViolationIds.has(id))
+                  const toggleAll = () => {
+                    setSelectedViolationIds((prev) => {
+                      const next = new Set(prev)
+                      if (allSelected) {
+                        for (const id of ids) next.delete(id)
+                      } else {
+                        for (const id of ids) next.add(id)
+                      }
+                      return next
+                    })
+                  }
+                  return (
+                    <button
+                      onClick={toggleAll}
+                      title={allSelected ? `Desmarcar ${ids.length} violações desta regra` : `Selecionar ${ids.length} violações desta regra`}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--fg-3)', display: 'flex' }}
+                    >
+                      {allSelected
+                        ? <CheckSquare size={14} style={{ color: 'oklch(35% 0.18 240)' }} />
+                        : someSelected
+                          ? <CheckSquare size={14} style={{ color: 'oklch(35% 0.18 240)', opacity: 0.5 }} />
+                          : <Square size={14} />
+                      }
+                    </button>
+                  )
+                })() : <span />}
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}>{item.regra}</span>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)', fontVariantNumeric: 'tabular-nums' }}>
                   {item.count}

@@ -727,16 +727,22 @@ export async function runMultiViolationAnalyzer(env, { violationIds, hint = null
 
   // 9. Valida cada proposta
   const propostasValidadas = []
+  const falhasValidacao = []
   for (const p of propostas) {
     try {
       propostasValidadas.push(validateAndNormalizeProposal(p, agentRulesText))
     } catch (err) {
+      const motivo = String(err.message || '').replace(/^\[analyzer\/validation\]\s*/, '')
+      falhasValidacao.push(`"${p.regra_alvo || '?'}" (tipo=${p.tipo_mudanca || '?'}): ${motivo}`)
       console.error(`[multiAnalyzer/validation] Proposta rejeitada (${p.regra_alvo}): ${err.message}`)
     }
   }
 
   if (propostasValidadas.length === 0) {
-    throw new Error('[multiAnalyzer/validation] Todas as propostas geradas falharam na validação')
+    const detalhes = falhasValidacao.slice(0, 3).join(' | ')
+    throw new Error(
+      `[multiAnalyzer/validation] Todas as ${propostas.length} propostas geradas falharam. Motivos: ${detalhes}`,
+    )
   }
 
   return {
