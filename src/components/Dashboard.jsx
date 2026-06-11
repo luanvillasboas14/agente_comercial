@@ -659,17 +659,21 @@ export default function Dashboard({ onSelectExecution }) {
                             borderRadius: 4,
                           }}
                         >
-                          <div
+                          <pre
                             style={{
                               fontFamily: 'monospace',
                               fontSize: 12,
                               color: 'var(--fg-1)',
-                              wordBreak: 'break-all',
+                              wordBreak: 'break-word',
+                              whiteSpace: 'pre-wrap',
                               marginBottom: 4,
+                              marginTop: 0,
+                              maxHeight: 240,
+                              overflowY: 'auto',
                             }}
                           >
-                            {g.fingerprint.length > 120 ? g.fingerprint.slice(0, 120) + '…' : g.fingerprint}
-                          </div>
+                            {String(g.exemplo?.error || g.fingerprint)}
+                          </pre>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--fg-3)' }}>
                             <span>
                               {g.count} ocorrência{g.count !== 1 ? 's' : ''} · última {relativeTime(g.ultima?.timestamp)}
@@ -721,48 +725,52 @@ export default function Dashboard({ onSelectExecution }) {
                           <div
                             key={i}
                             style={{
-                              padding: '6px 10px',
+                              padding: '8px 10px',
                               background: 'var(--bg-2)',
                               border: '1px solid var(--line-1, var(--border-1))',
                               borderRadius: 4,
                               fontSize: 11,
                               display: 'flex',
-                              alignItems: 'center',
-                              gap: 8,
+                              flexDirection: 'column',
+                              gap: 6,
                             }}
                           >
-                            <span style={{ color: 'var(--fg-3)' }}>{relativeTime(e.timestamp)}</span>
-                            {(e.lead || e.leadId) && (
-                              <span style={{ color: 'var(--fg-3)' }}>lead {e.lead || e.leadId}</span>
-                            )}
-                            <span
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ color: 'var(--fg-3)' }}>{relativeTime(e.timestamp)}</span>
+                              {(e.lead || e.leadId) && (
+                                <span style={{ color: 'var(--fg-3)' }}>lead {e.lead || e.leadId}</span>
+                              )}
+                              <button
+                                type="button"
+                                style={{
+                                  marginLeft: 'auto',
+                                  flexShrink: 0,
+                                  background: 'transparent',
+                                  border: '1px solid var(--border-1)',
+                                  color: 'var(--fg-2)',
+                                  padding: '1px 8px',
+                                  fontSize: 11,
+                                  borderRadius: 3,
+                                  cursor: 'pointer',
+                                }}
+                                onClick={() => onSelectExecution?.(e.id)}
+                              >
+                                Abrir
+                              </button>
+                            </div>
+                            <pre
                               style={{
+                                margin: 0,
                                 fontFamily: 'monospace',
                                 color: 'var(--fg-2)',
-                                flexGrow: 1,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                maxHeight: 200,
+                                overflowY: 'auto',
                               }}
                             >
-                              {String(e.error || '').split('\n')[0].slice(0, 120)}
-                            </span>
-                            <button
-                              type="button"
-                              style={{
-                                flexShrink: 0,
-                                background: 'transparent',
-                                border: '1px solid var(--border-1)',
-                                color: 'var(--fg-2)',
-                                padding: '1px 6px',
-                                fontSize: 11,
-                                borderRadius: 3,
-                                cursor: 'pointer',
-                              }}
-                              onClick={() => onSelectExecution?.(e.id)}
-                            >
-                              Abrir
-                            </button>
+                              {String(e.error || '')}
+                            </pre>
                           </div>
                         ))}
                       </div>
