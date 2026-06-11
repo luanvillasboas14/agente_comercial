@@ -69,6 +69,26 @@ Este documento concentra contexto operacional para agentes (humanos ou LLM) que 
 - *Webhook adicional do Kommo* → não tem evento "funnel exit" nativo. Snapshot-diff é mais simples e cobre todos os casos.
 - *Avaliar todas as conversas, não só pós-funil* → ruído alto. Saída do funil é o gate natural pra "conversa terminada".
 
+### 2026-06-11 — Estratégia em 2 camadas pra eliminar erros críticos da IA
+
+**Modelo usado pra decidir:** Opus 4.7 (principal).
+
+**Decisão:** Para erros graves recorrentes (ex.: IA afirmando que pós-graduação tem matrícula isenta — falso), adotar 2 camadas complementares em vez de só evoluir o prompt:
+
+1. **Hard guard determinístico** (`server/ai/replyGuards.js`): função pura que roda em [`webhookEvolution.js`](server/evolution/webhookEvolution.js) antes do envio pro WhatsApp. Intercepta resposta com padrão proibido via regex e reescreve com texto correto. Loga em `aiMeta.hardGuardsTriggered`. Rede de segurança imediata, independente de o LLM ter aprendido.
+2. **Sistema "Confirmar negativo"** (`ia_feedback_negativos`): espelho exato do `ia_feedback_acertos`, mas com semântica oposta — operador marca uma violação como erro grave confirmado. Vira fila prioritária em "Otimizador de Prompt → Negativos confirmados pendentes" com analyzer dedicado (`runNegativosAnalyzer`) que gera propostas com framing firme. Sinal humano que evolui o prompt pela raiz.
+
+Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt amadurecer no longo prazo.
+
+**Padrão pra criar novos guards:** adicionar nova função `guardX(reply)` em `replyGuards.js` seguindo o template do `guardPosIsencao`, com 5+ testes em `replyGuards.test.js`. Manter funções puras (sem I/O).
+
+**Padrão pra novos tipos de feedback humano:** espelhar a tríade `acertosStore.js` + endpoint `/acertos/analyze` + seção "Acertos pendentes" no PromptOptimizer. Toda nova fila vira uma `origem` distinta em `ia_prompt_proposals` (ex.: `acerto`, `negativo_confirmado`, `aprendizado_positivo`, `feedback_negativo`).
+
+**Alternativas descartadas:**
+- *Só evoluir o prompt sem hard guard* → leva semanas pro modelo absorver, e enquanto isso clientes recebem info errada de pós.
+- *Só hard guard sem sistema de negativos* → guard é frágil, não escala pra cada nova classe de erro; precisa do canal humano pra prompt evoluir.
+- *+1/-1 em toda execução* (proposta original do usuário) → muito ruído, e infraestrutura de acertos+negativos no Feedback IA cobre o mesmo valor com escopo menor. +1 fica adiado.
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).
