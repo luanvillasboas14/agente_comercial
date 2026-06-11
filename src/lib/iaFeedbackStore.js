@@ -183,3 +183,26 @@ export async function analyzeAcertos(acertoIds, hint) {
     body: JSON.stringify({ acertoIds, hint: hint || undefined }),
   })
 }
+
+// ─── Negativos (erros graves confirmados) ─────────────────────────────────────
+
+export async function createNegativo({ feedback_id, regra, citacao, descricao_violacao, motivo }) {
+  return apiFetch(`${BASE}/negativos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ feedback_id, regra, citacao, descricao_violacao, motivo }),
+  })
+}
+
+export async function listNegativos({ status = 'pendente', limit = 100 } = {}) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiFetch(`${BASE}/negativos${qs}`)
+}
+
+export async function analyzeNegativos(negativoIds, hint) {
+  return apiFetch(`${BASE}/negativos/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ negativoIds, hint: hint || undefined }),
+  })
+}

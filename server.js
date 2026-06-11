@@ -53,8 +53,9 @@ import { evaluateLead } from './server/iaFeedbackJob.js'
 import { seedInitialVersionIfEmpty, getActiveVersion, listVersions, getVersionById, createVersionAndActivate, rollbackToVersion } from './server/iaFeedback/promptVersionStore.js'
 import { createProposal, listProposals, getProposalById, markProposalApplied, markProposalRejected, isProposalObsolete } from './server/iaFeedback/proposalsStore.js'
 import { getViolationsRanking } from './server/iaFeedback/violationsRanking.js'
-import { analyzeRule, runMultiViolationAnalyzer, runAcertosAnalyzer } from './server/iaFeedback/promptAnalyzer.js'
+import { analyzeRule, runMultiViolationAnalyzer, runAcertosAnalyzer, runNegativosAnalyzer } from './server/iaFeedback/promptAnalyzer.js'
 import { createAcerto, listAcertos, markAcertosProcessados } from './server/iaFeedback/acertosStore.js'
+import { createNegativo, listNegativos, markNegativosProcessados } from './server/iaFeedback/negativosStore.js'
 import { refreshAgentRulesText, getFallbackAgentRulesText, getAgentRulesText } from './server/ai/promptsLoader.js'
 import { startDetectorScheduler, runOnce as runDetectorOnce, getDetectorRunnerStatus } from './server/iaLearning/detectorRunner.js'
 import { startAceiteSyncScheduler, runOnce as runAceiteSyncOnce, getAceiteSyncStatus } from './server/iaLearning/aceiteSyncRunner.js'
@@ -3128,6 +3129,98 @@ app.post('/api/ia-feedback/acertos/analyze', async (req, res) => {
     })
   } catch (e) {
     console.error('[ia-feedback/acertos/analyze]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+// ── Negativos (erros graves confirmados) ──
+
+app.post('/api/ia-feedback/negativos', async (req, res) => {
+  try {
+    const { feedback_id, regra, citacao, descricao_violacao, motivo } = req.body || {}
+    if (!feedback_id) return res.status(400).json({ error: 'feedback_id é obrigatório' })
+    if (!regra) return res.status(400).json({ error: 'regra é obrigatório' })
+
+    const negativo = await createNegativo(process.env, { feedback_id, regra, citacao, descricao_violacao, motivo })
+    res.json({ ok: true, negativo })
+  } catch (e) {
+    console.error('[ia-feedback/negativos POST]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.get('/api/ia-feedback/negativos', async (req, res) => {
+  try {
+    const { status, limit } = req.query
+    const negativos = await listNegativos(process.env, {
+      status: status || undefined,
+      limit: limit ? Math.min(200, Math.max(1, Number(limit))) : 50,
+    })
+    res.json(negativos)
+  } catch (e) {
+    console.error('[ia-feedback/negativos GET]', e.message)
+    res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
+  }
+})
+
+app.post('/api/ia-feedback/negativos/analyze', async (req, res) => {
+  try {
+    const { negativoIds, hint } = req.body || {}
+    if (!Array.isArray(negativoIds) || negativoIds.length === 0) {
+      return res.status(400).json({ error: 'negativoIds deve ser um array não vazio de UUIDs' })
+    }
+    if (negativoIds.length > 20) {
+      return res.status(400).json({ error: 'Máximo de 20 negativos por análise' })
+    }
+
+    const activeVersion = await getActiveVersion(process.env)
+    if (!activeVersion) {
+      return res.status(404).json({ error: 'Nenhuma versão ativa encontrada' })
+    }
+
+    const result = await runNegativosAnalyzer(process.env, {
+      negativoIds,
+      hint: hint || null,
+      activeVersion,
+    })
+
+    // Salva cada proposta gerada
+    const savedProposalIds = []
+    for (const p of result.propostas) {
+      const saved = await createProposal(process.env, {
+        baseada_em_versao_id: activeVersion.id,
+        modelo_analisador: resolveModel(process.env, 'prompt_optimizer'),
+        regra_alvo: p.regra_alvo,
+        tipo_mudanca: p.tipo_mudanca,
+        trecho_antes: p.trecho_antes || '',
+        trecho_depois: p.trecho_depois || '',
+        justificativa: p.justificativa,
+        conflitos_potenciais: p.conflitos_potenciais || null,
+        exemplos_violacoes: negativoIds.map((id) => ({ negativo_id: id })),
+        total_violacoes: result.negativosEncontrados,
+        janela_de: result.janela_de,
+        janela_ate: result.janela_ate,
+        origem: 'negativo_confirmado',
+        violacoes_origem_ids: null,
+      })
+      savedProposalIds.push(saved?.id || null)
+    }
+
+    const firstProposalId = savedProposalIds.find(Boolean) || null
+
+    // Marca negativos como processados
+    await markNegativosProcessados(process.env, negativoIds, firstProposalId).catch((e) => {
+      console.error('[ia-feedback/negativos/analyze] markNegativosProcessados falhou:', e.message)
+    })
+
+    res.json({
+      ok: true,
+      proposalIds: savedProposalIds.filter(Boolean),
+      totalPropostas: result.propostas.length,
+      negativosEncontrados: result.negativosEncontrados,
+    })
+  } catch (e) {
+    console.error('[ia-feedback/negativos/analyze]', e.message)
     res.status(500).json({ error: e.message, detail: e.stack?.split('\n')[1] })
   }
 })

@@ -3,9 +3,10 @@
  * com base em violações frequentes detectadas pelo Feedback IA.
  *
  * Exporta:
- *   analyzeRule            — análise de uma única regra (fluxo original)
+ *   analyzeRule               — análise de uma única regra (fluxo original)
  *   runMultiViolationAnalyzer — análise de N violações selecionadas manualmente
- *   runAcertosAnalyzer     — análise de N falsos-positivos para reforçar comportamentos corretos
+ *   runAcertosAnalyzer        — análise de N falsos-positivos para reforçar comportamentos corretos
+ *   runNegativosAnalyzer      — análise de N erros graves confirmados para corrigir com instrução firme
  */
 
 import { resolveModel } from '../ai/modelRegistry.js'
@@ -881,5 +882,209 @@ export async function runAcertosAnalyzer(env, { acertoIds, hint = null, activeVe
     janela_ate,
     acertoIds,
     acertosEncontrados: acertos.length,
+  }
+}
+
+// ─── Prompts para análise de negativos (erros graves confirmados) ─────────────
+
+const SYSTEM_PROMPT_NEGATIVOS = `Você é um engenheiro de prompts especializado em corrigir regras de agentes conversacionais.
+
+CONTEXTO:
+Um agente de WhatsApp opera com regras numeradas (Regra 1 a Regra 18). O administrador marcou certas violações detectadas pelo avaliador automático como ERROS GRAVES CONFIRMADOS — ou seja, esses erros são reais, sérios, e NÃO podem se repetir. Sua tarefa é propor mudanças no prompt que CORRIJAM explicitamente esses padrões, com instrução firme e clara para o agente NÃO repetir esses comportamentos.
+
+DIFERENÇA CRÍTICA EM RELAÇÃO A ACERTOS:
+- Acertos = avaliador errou, IA agiu certo → protejer o comportamento correto
+- Negativos confirmados = IA agiu ERRADO, gravemente → corrigir a regra com instrução direta e sem ambiguidade
+
+ESTRATÉGIAS POSSÍVEIS:
+- Reforçar a instrução com linguagem mais direta e sem margem para interpretação ("NUNCA faça X", "É obrigatório Y antes de Z")
+- Adicionar um exemplo negativo explícito na regra ("NÃO faça como no caso: ...")
+- Fechar brechas de interpretação que permitiram o erro
+- Consolidar subitens ambíguos que causaram a violação
+- Se o padrão é muito específico e já existe instrução clara, verificar se o problema é de treinamento, não de regra — nesse caso retorne tipo_mudanca="nenhuma" explicando
+
+Trechos entre <!-- IMUTÁVEL --> e <!-- /IMUTÁVEL --> NÃO podem ser modificados.
+
+REGRAS DA SUA RESPOSTA:
+1. Estes casos foram CONFIRMADOS pelo operador como erros graves. A proposta de regra DEVE cobrir explicitamente esses padrões, com instrução firme e clara para o agente NÃO repetir.
+2. Cirurgia, não cirurgia plástica: modifique o mínimo necessário, mas não hesite em ser direto.
+3. Mantenha o tom: português brasileiro informal-profissional.
+4. trecho_antes DEVE ser cópia LITERAL E EXATA do prompt atual.
+5. Cada proposta deve ser ANCORADA no exemplo real recebido.
+6. Detecte conflitos e sinalize em conflitos_potenciais.
+
+SAÍDA: JSON estrito, apenas o objeto, sem markdown:
+
+{
+  "propostas": [
+    {
+      "regra_alvo": "Regra X",
+      "tipo_mudanca": "ajuste" | "consolidacao" | "novo_exemplo" | "remocao" | "nenhuma",
+      "trecho_antes": "<texto literal copiado do prompt atual>",
+      "trecho_depois": "<texto modificado, ou vazio se nenhuma>",
+      "justificativa": "<2-4 frases — inicie com 'Negativo confirmado: ...' descrevendo o erro grave e como a mudança o previne>",
+      "conflitos_potenciais": "<texto ou null>"
+    }
+  ]
+}`
+
+function buildNegativosUserMessage({ agentRulesText, versao, negativos, conversasMap, hint }) {
+  const negativosTexto = negativos.map((n, i) => {
+    const conversa = conversasMap.get(n.feedback_id)
+    const conversaTexto = conversa ? formatConversa(conversa) : '(conversa não disponível)'
+    return `### Negativo confirmado ${i + 1} — ${n.regra}
+
+O administrador confirmou que este foi um ERRO GRAVE da IA ao aplicar "${n.regra}".
+
+Citação do turno: "${n.citacao || '(sem citação)'}"
+O que o avaliador disse: ${n.descricao_violacao || '(sem descrição)'}
+Motivo do administrador para confirmar como erro grave: ${n.motivo || '(não informado)'}
+
+Conversa completa:
+${conversaTexto}`
+  }).join('\n\n═══\n\n')
+
+  const hintBlock = hint ? `\n\nINSTRUÇÃO ADICIONAL DO ADMIN:\n${hint}` : ''
+
+  return `PROMPT INTEIRO ATUAL (versão ${versao}):
+
+---
+${agentRulesText}
+---
+
+ERROS GRAVES CONFIRMADOS PELO ADMINISTRADOR (${negativos.length} no total):
+
+${negativosTexto}${hintBlock}
+
+Analise cada erro grave confirmado. Proponha mudanças com instrução firme que impeçam a repetição desses padrões. Retorne o JSON especificado.`
+}
+
+// ─── runNegativosAnalyzer ─────────────────────────────────────────────────────
+
+/**
+ * Analisa N erros graves confirmados e propõe mudanças para prevenir repetição.
+ *
+ * negativoIds: array de UUIDs de ia_feedback_negativos
+ *
+ * Retorna: { propostas: proposalData[], janela_de, janela_ate, negativoIds, negativosEncontrados }
+ */
+export async function runNegativosAnalyzer(env, { negativoIds, hint = null, activeVersion }) {
+  if (!Array.isArray(negativoIds) || negativoIds.length === 0) {
+    throw new Error('[negativosAnalyzer/input] negativoIds não pode ser vazio')
+  }
+
+  const agentRulesText = activeVersion.agent_rules_text
+
+  const sb = getFeedbackSupabase(env)
+  if (!sb) throw new Error('[negativosAnalyzer/config] SUPABASE_URL_FEEDBACK não configurado')
+
+  // 1. Busca os negativos
+  let negativosRows
+  try {
+    const idsCsv = negativoIds.map((id) => encodeURIComponent(id)).join(',')
+    negativosRows = await sb.select(
+      'ia_feedback_negativos',
+      `select=id,feedback_id,regra,citacao,descricao_violacao,motivo,created_at&id=in.(${idsCsv})`,
+    )
+  } catch (err) {
+    throw new Error(`[negativosAnalyzer/supabase] Falha ao buscar negativos: ${err.message}`)
+  }
+
+  const negativos = Array.isArray(negativosRows) ? negativosRows : []
+  if (negativos.length === 0) {
+    throw new Error('[negativosAnalyzer/input] Nenhum negativo encontrado com os IDs fornecidos')
+  }
+
+  // 2. Busca conversas
+  const feedbackIds = [...new Set(negativos.map((n) => String(n.feedback_id)).filter(Boolean))]
+  const conversasMap = feedbackIds.length > 0
+    ? await fetchConversationsByFeedbackIds(env, feedbackIds)
+    : new Map()
+
+  // 3. Datas da janela
+  const datas = negativos.map((n) => n.created_at).filter(Boolean).sort()
+  const janela_de = datas[0] || new Date().toISOString()
+  const janela_ate = new Date().toISOString()
+
+  // 4. Resolve modelo e chama OpenAI
+  const model = resolveModel(env, 'prompt_optimizer')
+  const key = env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || ''
+  if (!key) throw new Error('[negativosAnalyzer/config] OPENAI_API_KEY não configurada')
+
+  const body = {
+    model,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT_NEGATIVOS },
+      {
+        role: 'user',
+        content: buildNegativosUserMessage({
+          agentRulesText,
+          versao: activeVersion.versao,
+          negativos,
+          conversasMap,
+          hint,
+        }),
+      },
+    ],
+  }
+
+  const timeoutMs = Number(env.PROMPT_OPTIMIZER_OPENAI_TIMEOUT_MS || 180_000)
+  const res = await fetchWithTimeout(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  )
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new Error(
+      `[negativosAnalyzer/openai] HTTP ${res.status} (modelo=${model}): ${errText.slice(0, 400) || res.statusText}`,
+    )
+  }
+
+  const data = await res.json()
+  const content = String(data?.choices?.[0]?.message?.content || '').trim()
+
+  // 5. Parse JSON
+  let parsed2
+  try {
+    parsed2 = JSON.parse(content)
+  } catch (err) {
+    throw new Error(`[negativosAnalyzer/parser] Falha ao parsear resposta: ${err.message}`)
+  }
+
+  const propostas = Array.isArray(parsed2.propostas) ? parsed2.propostas : []
+  if (propostas.length === 0) {
+    throw new Error('[negativosAnalyzer/parser] Modelo não retornou nenhuma proposta')
+  }
+
+  // 6. Valida cada proposta
+  const propostasValidadas = []
+  for (const p of propostas) {
+    try {
+      propostasValidadas.push(validateAndNormalizeProposal(p, agentRulesText))
+    } catch (err) {
+      console.error(`[negativosAnalyzer/validation] Proposta rejeitada (${p.regra_alvo}): ${err.message}`)
+    }
+  }
+
+  if (propostasValidadas.length === 0) {
+    throw new Error('[negativosAnalyzer/validation] Todas as propostas geradas falharam na validação')
+  }
+
+  return {
+    propostas: propostasValidadas,
+    janela_de,
+    janela_ate,
+    negativoIds,
+    negativosEncontrados: negativos.length,
   }
 }

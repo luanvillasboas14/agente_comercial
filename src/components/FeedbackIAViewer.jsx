@@ -3,7 +3,7 @@ import { usePollingWhenVisible } from '../lib/usePollingWhenVisible'
 import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   AlertTriangle, CheckCircle, Clock, MessageSquare,
-  Bot, ListChecks, Search, Loader, RotateCcw, Copy, Wand2, ThumbsUp,
+  Bot, ListChecks, Search, Loader, RotateCcw, Copy, Wand2, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import {
   loadAvaliacoes,
@@ -12,6 +12,7 @@ import {
   loadStatus,
   avaliarManual,
   createAcerto,
+  createNegativo,
 } from '../lib/iaFeedbackStore'
 import PromptOptimizer from './PromptOptimizer'
 
@@ -247,10 +248,155 @@ function AcertoModal({ feedbackId, violacao, onClose, onSaved }) {
   )
 }
 
+// ─── Modal "Confirmar negativo" ───────────────────────────────────────────────
+
+function NegativoModal({ feedbackId, violacao, onClose, onSaved }) {
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleSave() {
+    setError(null)
+    setSaving(true)
+    try {
+      await createNegativo({
+        feedback_id: feedbackId,
+        regra: violacao.regra,
+        citacao: violacao.citacao || '',
+        descricao_violacao: violacao.descricao || '',
+        motivo: motivo.trim() || null,
+      })
+      onSaved?.()
+      onClose()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1100, padding: 24,
+    }}>
+      <div style={{
+        background: 'var(--bg-1)', border: '1px solid oklch(68% 0.20 25 / 0.40)', borderRadius: 14,
+        width: '100%', maxWidth: 480,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderBottom: '1px solid var(--line-1)',
+        }}>
+          <ThumbsDown size={16} style={{ color: 'oklch(40% 0.20 25)', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--fg-1)' }}>Confirmar negativo</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>
+              Este caso é um erro grave que NÃO pode se repetir.
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Contexto da violação */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 8, fontSize: 12,
+            background: 'var(--bg-2)', border: '1px solid var(--line-1)',
+          }}>
+            <div style={{ fontWeight: 600, color: 'var(--fg-3)', fontSize: 10, textTransform: 'uppercase', marginBottom: 6 }}>
+              O que o avaliador disse
+            </div>
+            <div style={{ color: 'var(--fg-2)', marginBottom: violacao.citacao ? 6 : 0 }}>{violacao.descricao}</div>
+            {violacao.citacao && (
+              <div style={{
+                fontSize: 11, color: 'var(--fg-3)', fontStyle: 'italic',
+                padding: '3px 7px', background: 'var(--bg-1)', borderRadius: 4,
+                borderLeft: '2px solid oklch(68% 0.20 25 / 0.40)',
+              }}>
+                "{violacao.citacao}"
+              </div>
+            )}
+          </div>
+
+          {/* Motivo */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-2)', marginBottom: 6 }}>
+              Motivo (opcional)
+            </div>
+            <textarea
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ex.: a IA claramente ignorou a regra e ofereceu desconto sem autorização..."
+              rows={4}
+              style={{
+                width: '100%', padding: '8px 10px', borderRadius: 7,
+                background: 'var(--bg-2)', border: '1px solid var(--line-1)',
+                color: 'var(--fg-1)', fontSize: 12, fontFamily: 'inherit', resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '8px 12px', borderRadius: 7, fontSize: 12,
+              background: 'oklch(68% 0.20 25 / 0.10)', border: '1px solid oklch(68% 0.20 25 / 0.30)',
+              color: 'oklch(40% 0.20 25)',
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          display: 'flex', gap: 8, justifyContent: 'flex-end',
+          padding: '12px 18px', borderTop: '1px solid var(--line-1)',
+        }}>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            style={{
+              padding: '7px 16px', borderRadius: 8, fontSize: 12,
+              background: 'var(--bg-2)', border: '1px solid var(--line-1)',
+              color: 'var(--fg-3)', cursor: 'pointer',
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: 'oklch(68% 0.20 25 / 0.18)', border: '1px solid oklch(68% 0.20 25 / 0.40)',
+              color: 'oklch(35% 0.20 25)',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? <Loader size={12} className="spin" /> : <ThumbsDown size={12} />}
+            {saving ? 'Salvando...' : 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AvaliacaoDetail({ id, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [acertoModal, setAcertoModal] = useState(null) // violação sendo marcada como acerto
+  const [negativoModal, setNegativoModal] = useState(null) // violação sendo marcada como negativo
+  // Rastreia violações já marcadas nesta sessão (por índice na lista)
+  const [acertados, setAcertados] = useState(new Set())
+  const [negativados, setNegativados] = useState(new Set())
 
   useEffect(() => {
     loadAvaliacao(id).then((d) => {
@@ -319,9 +465,29 @@ function AvaliacaoDetail({ id, onClose }) {
                   padding: '10px 12px', borderRadius: 8, background: 'var(--bg-2)',
                   border: '1px solid var(--line-1)',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
                     <SeveridadeBadge severidade={v.severidade} />
                     <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-1)' }}>{v.regra} — {v.titulo}</span>
+                    {acertados.has(i) && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+                        background: 'oklch(72% 0.14 155 / 0.15)', color: 'oklch(30% 0.14 155)',
+                        border: '1px solid oklch(72% 0.14 155 / 0.35)', textTransform: 'uppercase',
+                      }}>
+                        <ThumbsUp size={9} /> Acerto
+                      </span>
+                    )}
+                    {negativados.has(i) && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+                        background: 'oklch(68% 0.20 25 / 0.15)', color: 'oklch(35% 0.20 25)',
+                        border: '1px solid oklch(68% 0.20 25 / 0.35)', textTransform: 'uppercase',
+                      }}>
+                        <ThumbsDown size={9} /> Negativo confirmado
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 4 }}>{v.descricao}</div>
                   {v.citacao && (
@@ -370,10 +536,10 @@ function AvaliacaoDetail({ id, onClose }) {
                       </button>
                     </div>
                   )}
-                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
                     <button
                       type="button"
-                      onClick={() => setAcertoModal(v)}
+                      onClick={() => setAcertoModal({ violacao: v, idx: i })}
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 5,
                         padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
@@ -382,6 +548,18 @@ function AvaliacaoDetail({ id, onClose }) {
                       }}
                     >
                       <ThumbsUp size={11} /> Foi um acerto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNegativoModal({ violacao: v, idx: i })}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                        background: 'oklch(68% 0.20 25 / 0.10)', border: '1px solid oklch(68% 0.20 25 / 0.30)',
+                        color: 'oklch(40% 0.20 25)', cursor: 'pointer',
+                      }}
+                    >
+                      <ThumbsDown size={11} /> Confirmar negativo
                     </button>
                   </div>
                 </div>
@@ -501,9 +679,25 @@ function AvaliacaoDetail({ id, onClose }) {
       {acertoModal && (
         <AcertoModal
           feedbackId={data.id}
-          violacao={acertoModal}
+          violacao={acertoModal.violacao}
           onClose={() => setAcertoModal(null)}
-          onSaved={() => setAcertoModal(null)}
+          onSaved={() => {
+            setAcertados((prev) => new Set([...prev, acertoModal.idx]))
+            setAcertoModal(null)
+          }}
+        />
+      )}
+
+      {/* Modal "Confirmar negativo" */}
+      {negativoModal && (
+        <NegativoModal
+          feedbackId={data.id}
+          violacao={negativoModal.violacao}
+          onClose={() => setNegativoModal(null)}
+          onSaved={() => {
+            setNegativados((prev) => new Set([...prev, negativoModal.idx]))
+            setNegativoModal(null)
+          }}
         />
       )}
     </div>

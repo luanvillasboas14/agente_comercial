@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Wand2, RefreshCw, ChevronDown, ChevronRight, AlertTriangle,
   CheckCircle, Clock, Copy, Loader, History, FileText, RotateCcw,
-  X, Zap, GitCompare, ThumbsUp, Square, CheckSquare,
+  X, Zap, GitCompare, ThumbsUp, ThumbsDown, Square, CheckSquare,
 } from 'lucide-react'
 import {
   loadViolationsRanking,
@@ -18,6 +18,8 @@ import {
   analyzeMultiViolations,
   loadAcertos,
   analyzeAcertos,
+  listNegativos,
+  analyzeNegativos,
 } from '../lib/iaFeedbackStore'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1211,6 +1213,178 @@ function AcertosPendentes({ onAnalyzeComplete }) {
   )
 }
 
+// ─── Seção 1c: Negativos confirmados pendentes ───────────────────────────────
+
+function NegativosPendentes({ onAnalyzeComplete }) {
+  const [negativos, setNegativosState] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [error, setError] = useState(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    listNegativos({ status: 'pendente', limit: 100 }).then((rows) => {
+      setNegativosState(Array.isArray(rows) ? rows : [])
+      setLoading(false)
+    }).catch((e) => {
+      setError(e.message)
+      setLoading(false)
+    })
+  }, [])
+
+  useEffect(() => { if (open) load() }, [open, load])
+
+  function toggleNegativo(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function handleAnalyzeNegativos() {
+    if (selectedIds.size === 0) return
+    setError(null)
+    setAnalyzing(true)
+    try {
+      await analyzeNegativos([...selectedIds])
+      setSelectedIds(new Set())
+      load()
+      onAnalyzeComplete?.()
+    } catch (e) {
+      setError(`Erro ao analisar negativos: ${e.message}`)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const nPendentes = negativos.length
+  const nSelected = selectedIds.size
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <button
+        onClick={() => setOpen((p) => !p)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '10px 14px', borderRadius: 10, fontSize: 12, fontWeight: 500,
+          background: 'oklch(68% 0.20 25 / 0.08)', border: '1px solid oklch(68% 0.20 25 / 0.25)',
+          color: 'oklch(40% 0.20 25)', cursor: 'pointer', width: '100%',
+        }}
+      >
+        <ThumbsDown size={13} />
+        Negativos confirmados pendentes {nPendentes > 0 ? `(${nPendentes})` : ''}
+        <span style={{ fontSize: 10, color: 'oklch(50% 0.20 25)', fontWeight: 400, marginLeft: 4 }}>
+          — erros graves confirmados aguardando análise
+        </span>
+        {open ? <ChevronDown size={13} style={{ marginLeft: 'auto' }} /> : <ChevronRight size={13} style={{ marginLeft: 'auto' }} />}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8, border: '1px solid oklch(68% 0.20 25 / 0.25)', borderRadius: 10, overflow: 'hidden' }}>
+          {/* Toolbar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', background: 'oklch(68% 0.20 25 / 0.05)',
+            borderBottom: '1px solid oklch(68% 0.20 25 / 0.20)',
+          }}>
+            <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+              {loading ? 'Carregando...' : `${nPendentes} negativo(s) aguardando análise`}
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {nSelected > 0 && (
+                <button
+                  onClick={handleAnalyzeNegativos}
+                  disabled={analyzing}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '5px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    background: 'oklch(68% 0.20 25 / 0.15)', border: '1px solid oklch(68% 0.20 25 / 0.40)',
+                    color: 'oklch(35% 0.20 25)',
+                    cursor: analyzing ? 'not-allowed' : 'pointer',
+                    opacity: analyzing ? 0.6 : 1,
+                  }}
+                >
+                  {analyzing ? <Loader size={11} className="spin" /> : <ThumbsDown size={11} />}
+                  {analyzing ? 'Analisando...' : `Analisar negativos selecionados (${nSelected})`}
+                </button>
+              )}
+              <button onClick={load} disabled={loading} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 10px', borderRadius: 7, fontSize: 11,
+                background: 'var(--bg-2)', border: '1px solid var(--line-1)',
+                color: 'var(--fg-2)', cursor: 'pointer',
+              }}>
+                <RefreshCw size={10} />
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '8px 14px', fontSize: 12,
+              background: 'oklch(68% 0.20 25 / 0.08)', color: 'oklch(40% 0.20 25)',
+            }}>
+              {error}
+            </div>
+          )}
+
+          {!loading && negativos.length === 0 && (
+            <div style={{ padding: '14px', fontSize: 12, color: 'var(--fg-3)' }}>
+              Nenhum negativo pendente. Use o botão "Confirmar negativo" nas violações das avaliações para registrar.
+            </div>
+          )}
+
+          {negativos.map((n, i) => {
+            const isSelected = selectedIds.has(n.id)
+            return (
+              <div key={n.id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                padding: '10px 14px', fontSize: 12,
+                background: isSelected ? 'oklch(68% 0.20 25 / 0.06)' : 'var(--bg-1)',
+                borderTop: i > 0 ? '1px solid var(--line-1)' : 'none',
+              }}>
+                <button
+                  onClick={() => toggleNegativo(n.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', color: 'var(--fg-3)', display: 'flex', flexShrink: 0 }}
+                >
+                  {isSelected
+                    ? <CheckSquare size={14} style={{ color: 'oklch(40% 0.20 25)' }} />
+                    : <Square size={14} />
+                  }
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--fg-1)' }}>{n.regra}</span>
+                    <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>{fmt(n.created_at)}</span>
+                  </div>
+                  {n.citacao && (
+                    <div style={{
+                      fontSize: 11, color: 'var(--fg-3)', fontStyle: 'italic',
+                      padding: '3px 7px', background: 'var(--bg-2)', borderRadius: 4,
+                      borderLeft: '2px solid oklch(68% 0.20 25 / 0.40)', marginBottom: 3,
+                    }}>
+                      "{n.citacao}"
+                    </div>
+                  )}
+                  {n.motivo && (
+                    <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+                      <span style={{ fontWeight: 600 }}>Motivo: </span>{n.motivo}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Seção 2: Propostas ───────────────────────────────────────────────────────
 
 function ProposalsSection({ refreshKey, onVersionChanged }) {
@@ -1407,6 +1581,9 @@ export default function PromptOptimizer() {
 
       {/* Seção 1b: Acertos pendentes */}
       <AcertosPendentes onAnalyzeComplete={handleAnalyzeComplete} />
+
+      {/* Seção 1c: Negativos confirmados pendentes */}
+      <NegativosPendentes onAnalyzeComplete={handleAnalyzeComplete} />
 
       {/* Seção 2: Propostas */}
       <ProposalsSection refreshKey={proposalRefreshKey} onVersionChanged={handleVersionChanged} />
