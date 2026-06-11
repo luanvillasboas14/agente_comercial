@@ -33,6 +33,7 @@ import { seenMessage, withSessionLock } from './concurrency.js'
 import { findLeadByPhone } from '../kommoClient.js'
 import { sendMessageWithNote } from '../whatsappSender.js'
 import { generateExecutionId, saveExecution } from '../ai/executionTelemetry.js'
+import { applyHardGuards } from '../ai/replyGuards.js'
 import { rememberWamid, getWamids } from './sessionWamid.js'
 import { startTypingHeartbeat } from '../whatsappTypingHeartbeat.js'
 import { canonicalWhatsAppSessionId, phoneToWhatsAppSessionId } from '../phoneWhatsApp.js'
@@ -479,6 +480,16 @@ async function flushSessionInner(env, sessionId, opts = {}) {
     }
 
     if (out?.ok && out.reply) {
+      const guardResult = applyHardGuards(out.reply)
+      if (guardResult.triggered) {
+        console.warn(
+          `[${executionId}] HARD_GUARD disparou: ${guardResult.violations.map(v => v.guard).join(', ')}. ` +
+            `Original: "${out.reply.slice(0, 200)}..." → Reescrito.`,
+        )
+        out.reply = guardResult.reply
+        out.aiMeta = { ...(out.aiMeta || {}), hardGuardsTriggered: guardResult.violations }
+      }
+
       // 1ª prioridade: leadId vindo do scheduler (já achou no Kommo p/
       // listar quem tá no funil). Evita chamar findLeadByPhone de novo.
       if (Number.isFinite(leadIdHint) && leadIdHint > 0) {
