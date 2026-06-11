@@ -82,6 +82,28 @@ function isInRange(iso, start, end) {
   return d >= new Date(start) && d <= new Date(end + 'T23:59:59.999Z')
 }
 
+function fingerprintError(err) {
+  return String(err || '')
+    .split('\n')[0]
+    .replace(/\b\d+\b/g, 'N')
+    .replace(/EX-[\w-]+/g, 'EX-X')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200)
+}
+
+function relativeTime(iso) {
+  if (!iso) return '-'
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diffMs / 60000)
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min}min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `há ${h}h`
+  const d = Math.floor(h / 24)
+  return `há ${d}d`
+}
+
 /* ── UI Components ── */
 
 function KPI({ label, icon: Icon, value, unit, sub }) {
@@ -270,10 +292,11 @@ const PRESETS = [
   { label: '30 dias', days: 30 },
 ]
 
-export default function Dashboard() {
+export default function Dashboard({ onSelectExecution }) {
   const [executions, setExecutions] = useState([])
   const [loading, setLoading] = useState(true)
   const [activePreset, setActivePreset] = useState(7)
+  const [showAllErrors, setShowAllErrors] = useState(false)
 
   const today = toInputDate(new Date())
   const sevenAgo = toInputDate(new Date(Date.now() - 6 * 86400000))
@@ -473,6 +496,41 @@ export default function Dashboard() {
     }
   }, [executions, startDate, endDate])
 
+  const errorData = useMemo(() => {
+    const errosNaJanela = executions.filter((e) => e.error)
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
+    const errosUltimas24h = errosNaJanela.filter((e) => new Date(e.timestamp).getTime() >= cutoff)
+
+    const groupMap = {}
+    for (const e of errosNaJanela) {
+      const fp = fingerprintError(e.error)
+      if (!groupMap[fp]) {
+        groupMap[fp] = { fingerprint: fp, count: 0, ultima: null, exemplo: null }
+      }
+      groupMap[fp].count++
+      if (!groupMap[fp].ultima || new Date(e.timestamp) > new Date(groupMap[fp].ultima.timestamp)) {
+        groupMap[fp].ultima = { timestamp: e.timestamp, executionId: e.id, lead: e.lead || e.leadId || null }
+        groupMap[fp].exemplo = e
+      }
+    }
+
+    const gruposErro = Object.values(groupMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+
+    let dominante = null
+    if (errosUltimas24h.length > 0) {
+      const map24 = {}
+      for (const e of errosUltimas24h) {
+        const fp = fingerprintError(e.error)
+        map24[fp] = (map24[fp] || 0) + 1
+      }
+      dominante = Object.entries(map24).sort((a, b) => b[1] - a[1])[0]
+    }
+
+    return { errosNaJanela, errosUltimas24h, gruposErro, dominante }
+  }, [executions])
+
   const periodLabel = startDate === endDate
     ? 'Hoje'
     : `${new Date(startDate).toLocaleDateString('pt-BR')} — ${new Date(endDate).toLocaleDateString('pt-BR')}`
@@ -527,6 +585,31 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
+            {errorData.errosUltimas24h.length > 0 && (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 14px',
+                  background: 'oklch(68% 0.20 25 / 0.12)',
+                  border: '1px solid oklch(68% 0.20 25 / 0.35)',
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  fontSize: 13,
+                  color: 'var(--danger, oklch(68% 0.20 25))',
+                  cursor: 'pointer',
+                  lineHeight: 1.5,
+                  userSelect: 'none',
+                }}
+                onClick={() => document.getElementById('erros-painel')?.scrollIntoView({ behavior: 'smooth' })}
+              >
+                Atenção: {errorData.errosUltimas24h.length} erro{errorData.errosUltimas24h.length !== 1 ? 's' : ''} nas últimas 24h.
+                {errorData.dominante && (
+                  <> Padrão dominante: &ldquo;{errorData.dominante[0]}&rdquo; ({errorData.dominante[1]}&times; nas últimas 24h).</>
+                )}
+                {' '}Veja detalhes abaixo.
+              </div>
+            )}
+
             <div className="kpi-grid">
               <KPI icon={MessageSquare} label="Mensagens" value={stats.messagesCount} />
               <KPI icon={Zap} label="Tokens usados" value={stats.tokens > 1000000 ? (stats.tokens/1000000).toFixed(2) : stats.tokens.toLocaleString('pt-BR')} unit={stats.tokens > 1000000 ? 'M' : ''} sub="Total de tokens consumidos" />
@@ -545,6 +628,147 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <CostBreakdown items={stats.costBreakdown} total={stats.cost} />
+              </div>
+            </div>
+
+            <div id="erros-painel" className="card">
+              <div className="card-header">
+                <div className="card-title">
+                  <AlertTriangle size={14} />
+                  Últimos erros
+                </div>
+                <span className="card-title-sub">
+                  {errorData.errosNaJanela.length} no período
+                </span>
+              </div>
+              <div className="card-body">
+                {errorData.errosNaJanela.length === 0 ? (
+                  <div className="empty" style={{ color: 'var(--fg-3)', textAlign: 'center', padding: '12px 0' }}>
+                    Nenhum erro na janela selecionada.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {errorData.gruposErro.map((g, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: '8px 10px',
+                            background: 'var(--bg-2)',
+                            border: '1px solid var(--line-1, var(--border-1))',
+                            borderRadius: 4,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              color: 'var(--fg-1)',
+                              wordBreak: 'break-all',
+                              marginBottom: 4,
+                            }}
+                          >
+                            {g.fingerprint.length > 120 ? g.fingerprint.slice(0, 120) + '…' : g.fingerprint}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--fg-3)' }}>
+                            <span>
+                              {g.count} ocorrência{g.count !== 1 ? 's' : ''} · última {relativeTime(g.ultima?.timestamp)}
+                            </span>
+                            <button
+                              type="button"
+                              style={{
+                                marginLeft: 'auto',
+                                background: 'transparent',
+                                border: '1px solid var(--border-1)',
+                                color: 'var(--fg-2)',
+                                padding: '2px 8px',
+                                fontSize: 11,
+                                borderRadius: 3,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => onSelectExecution?.(g.ultima?.executionId)}
+                            >
+                              Ver execução
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {errorData.errosNaJanela.length > errorData.gruposErro.length && (
+                      <button
+                        type="button"
+                        style={{
+                          marginTop: 10,
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--accent)',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                        onClick={() => setShowAllErrors((v) => !v)}
+                      >
+                        {showAllErrors
+                          ? '[ - ] Recolher'
+                          : `[ + ] Ver todos os ${errorData.errosNaJanela.length} erros`}
+                      </button>
+                    )}
+
+                    {showAllErrors && (
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {errorData.errosNaJanela.map((e, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              padding: '6px 10px',
+                              background: 'var(--bg-2)',
+                              border: '1px solid var(--line-1, var(--border-1))',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                          >
+                            <span style={{ color: 'var(--fg-3)' }}>{relativeTime(e.timestamp)}</span>
+                            {(e.lead || e.leadId) && (
+                              <span style={{ color: 'var(--fg-3)' }}>lead {e.lead || e.leadId}</span>
+                            )}
+                            <span
+                              style={{
+                                fontFamily: 'monospace',
+                                color: 'var(--fg-2)',
+                                flexGrow: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {String(e.error || '').split('\n')[0].slice(0, 120)}
+                            </span>
+                            <button
+                              type="button"
+                              style={{
+                                flexShrink: 0,
+                                background: 'transparent',
+                                border: '1px solid var(--border-1)',
+                                color: 'var(--fg-2)',
+                                padding: '1px 6px',
+                                fontSize: 11,
+                                borderRadius: 3,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => onSelectExecution?.(e.id)}
+                            >
+                              Abrir
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 

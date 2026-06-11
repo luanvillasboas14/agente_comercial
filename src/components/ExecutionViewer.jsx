@@ -447,6 +447,15 @@ export default function ExecutionViewer() {
 
   useEffect(() => { fetchExecutions() }, [fetchExecutions])
 
+  useEffect(() => {
+    if (executions.length === 0) return
+    const pending = sessionStorage.getItem('pendingExecutionId')
+    if (!pending) return
+    sessionStorage.removeItem('pendingExecutionId')
+    const match = executions.find((e) => e.id === pending)
+    if (match) setSelected(match)
+  }, [executions])
+
   const handleClear = async () => {
     if (window.confirm('Limpar todas as execuções?')) {
       await clearExecutions()

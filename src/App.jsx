@@ -137,6 +137,11 @@ export default function App() {
     })
   }, [originalPrompts])
 
+  const navigateToExecution = useCallback((execId) => {
+    if (execId) sessionStorage.setItem('pendingExecutionId', execId)
+    setPage('executions')
+  }, [])
+
   const handleRestore = useCallback((id, body) => {
     setEdits((prev) => {
       const next = { ...prev, [id]: body }
@@ -165,7 +170,7 @@ export default function App() {
               <p style={{ color: 'var(--danger)' }}>Erro: {error}</p>
             </div>
           )}
-          {!loading && !error && page === 'dashboard' && <Dashboard />}
+          {!loading && !error && page === 'dashboard' && <Dashboard onSelectExecution={navigateToExecution} />}
           {!loading && !error && page === 'prompts' && (
             <PromptViewer prompts={prompts} onSave={handleSavePrompt} getVersions={getVersions} onRestore={handleRestore} />
           )}
