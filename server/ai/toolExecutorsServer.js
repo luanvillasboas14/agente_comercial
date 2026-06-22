@@ -48,20 +48,50 @@ async function getEmbedding(env, text, ctx, toolName) {
  * (quando existe) e marcar explicitamente quando NÃO existe, o LLM
  * pode decidir certo (ver promptsLoader regra 13).
  */
-function extractGradeLink(metadata) {
-  if (!metadata || typeof metadata !== 'object') return null
-  const raw =
-    metadata.grade_do_curso ||
-    metadata.grade_curso ||
-    metadata.link_grade ||
-    metadata.gradeCurricular ||
-    null
-  if (!raw) return null
-  const s = String(raw).trim()
-  if (!s) return null
-  // Aceita só se realmente parece URL — evita "N/A", "—", "ver site" virarem link.
-  if (!/^https?:\/\//i.test(s)) return null
-  return s
+function extractGradeLink(doc) {
+  if (!doc) return null
+
+  // 1) Caminho preferido: metadata estruturado (alguns docs vêm assim)
+  const md = doc.metadata
+  if (md && typeof md === 'object') {
+    const raw =
+      md.grade_do_curso ||
+      md.grade_curso ||
+      md.link_grade ||
+      md.gradeCurricular ||
+      null
+    if (raw) {
+      const s = String(raw).trim()
+      // Aceita só se realmente parece URL — evita "N/A", "—", "ver site" virarem link.
+      if (s && /^https?:\/\//i.test(s)) return s
+    }
+  }
+
+  // 2) Fallback: parsing do content. Boa parte dos cursos de graduação
+  //    tem o campo embutido em texto livre no formato:
+  //      "... grade_do_curso: https://drive.google.com/file/d/.../view?usp=sharing duracao_curso: 8 ..."
+  //    Sem esse fallback, o marcador [STATUS DA GRADE] vinha NAO DISPONIVEL
+  //    pra 100% dos docs e a IA enrolava em vez de mandar a grade.
+  const content = typeof doc.content === 'string' ? doc.content : null
+  if (content) {
+    const aliases = [
+      'grade_do_curso',
+      'grade do curso',
+      'link_grade',
+      'link da grade',
+      'grade_curricular',
+      'grade curricular',
+    ]
+    const aliasGroup = aliases.map((a) => a.replace(/[_ ]/g, '[_ ]?')).join('|')
+    const re = new RegExp(`(?:${aliasGroup})\\s*[:=]\\s*(https?://\\S+)`, 'i')
+    const m = content.match(re)
+    if (m) {
+      // Remove pontuação trailing comum em prosa (vírgula, ponto, etc.)
+      return m[1].replace(/[),.;]+$/, '')
+    }
+  }
+
+  return null
 }
 
 /**
@@ -308,7 +338,7 @@ async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10,
       if (isCourseTool) {
         const partes = [base]
 
-        const gradeUrl = extractGradeLink(d?.metadata)
+        const gradeUrl = extractGradeLink(d)
         const gradeStatus = gradeUrl
           ? `STATUS DA GRADE: DISPONIVEL — link oficial: ${gradeUrl}`
           : 'STATUS DA GRADE: NAO DISPONIVEL — não existe link/PDF da grade deste curso na nossa base.'
