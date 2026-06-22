@@ -6,6 +6,25 @@
 import { getFeedbackSupabase } from './supabaseClient.js'
 
 /**
+ * Normaliza o label de uma regra pra evitar fragmentação no ranking.
+ *
+ * O avaliador (LLM) gera labels livres como "Regra 13d", "Regra 13f (Grade
+ * curricular)", "Regra 13f / Coerência" etc. Pra agrupar tudo que é da mesma
+ * regra-mãe, extraímos o primeiro número que aparece após "Regra " e usamos
+ * "Regra N" como chave canônica.
+ *
+ * Labels sem número (ex.: "Coerência", "Nova Regra — Tom") são mantidos como
+ * estão — são violações de outro tipo conceitual.
+ */
+export function normalizeRegra(regra) {
+  const raw = String(regra || '').trim()
+  if (!raw) return raw
+  const m = raw.match(/\bregra\s+(\d+)/i)
+  if (!m) return raw
+  return `Regra ${m[1]}`
+}
+
+/**
  * Retorna o ranking de violações desde a ativação da versão atual do prompt.
  *
  * @param {Record<string,string>} env
@@ -32,13 +51,15 @@ export async function getViolationsRanking(env, { activeVersion, limit = 100 }) 
 
   const avaliacoes = Array.isArray(rows) ? rows : []
 
-  // Agrega violações por `regra`
+  // Agrega violações por `regra` canônica (após normalização).
+  // Guarda também os labels originais que caíram no grupo, pra debug/UX.
   const byRegra = {}
   for (const av of avaliacoes) {
     const violacoes = Array.isArray(av.violacoes) ? av.violacoes : []
     for (const v of violacoes) {
-      const regra = String(v.regra || '').trim()
-      if (!regra) continue
+      const regraOriginal = String(v.regra || '').trim()
+      if (!regraOriginal) continue
+      const regra = normalizeRegra(regraOriginal)
 
       if (!byRegra[regra]) {
         byRegra[regra] = {
@@ -46,8 +67,10 @@ export async function getViolationsRanking(env, { activeVersion, limit = 100 }) 
           count: 0,
           severidades: { alta: 0, media: 0, baixa: 0 },
           exemplos: [],
+          labels_originais: new Set(),
         }
       }
+      byRegra[regra].labels_originais.add(regraOriginal)
 
       byRegra[regra].count++
       const sev = String(v.severidade || 'baixa').toLowerCase()
@@ -63,9 +86,15 @@ export async function getViolationsRanking(env, { activeVersion, limit = 100 }) 
           severidade: sev,
           feedback_id: av.id,
           created_at: av.created_at,
+          regra_original: regraOriginal,
         })
       }
     }
+  }
+
+  // Converte Set → array pra serializar JSON
+  for (const k of Object.keys(byRegra)) {
+    byRegra[k].labels_originais = [...byRegra[k].labels_originais]
   }
 
   const ranking = Object.values(byRegra).sort((a, b) => b.count - a.count)

@@ -933,7 +933,20 @@ function ViolationsRanking({ onAnalyzeComplete, refreshKey }) {
                     </button>
                   )
                 })() : <span />}
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}>{item.regra}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {item.regra}
+                  {Array.isArray(item.labels_originais) && item.labels_originais.length > 1 && (
+                    <span
+                      title={`Agrupa ${item.labels_originais.length} variações: ${item.labels_originais.join(' · ')}`}
+                      style={{
+                        fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
+                        background: 'oklch(60% 0.10 265 / 0.15)', color: 'var(--fg-3)',
+                      }}
+                    >
+                      +{item.labels_originais.length - 1} variações
+                    </span>
+                  )}
+                </span>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-1)', fontVariantNumeric: 'tabular-nums' }}>
                   {item.count}
                 </span>
