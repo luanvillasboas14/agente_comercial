@@ -89,6 +89,33 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
 - *Só hard guard sem sistema de negativos* → guard é frágil, não escala pra cada nova classe de erro; precisa do canal humano pra prompt evoluir.
 - *+1/-1 em toda execução* (proposta original do usuário) → muito ruído, e infraestrutura de acertos+negativos no Feedback IA cobre o mesmo valor com escopo menor. +1 fica adiado.
 
+### 2026-07-01 — Enriquecimento do Feedback Comercial (dados + prompt) com dashboard externo
+
+**Modelo usado pra decidir:** Opus 4.8 (principal).
+
+**Contexto:** O feedback comercial (avaliação dos consultores humanos, `server/feedbackJob.js` → tabela `comercial_feedback`) precisava de: timezone correto (SP), incluir mensagens pré-prontas do Kommo ("/"), fase do lead no funil, nota menor pra leads perdidos, vários pontos +/- por conversa, e trechos para grifar. A visualização é feita num **dashboard externo** (outro projeto); este repo é só backend/dados/prompt.
+
+**Decisões:**
+
+1. **Mensagens "/" = `sender_type='bot'` / `origin='bot'`.** Não têm prefixo "/" no texto salvo (vem o template expandido). Antes eram descartadas em `groupIntoSegments`. Agora: bot ANTES da 1ª mensagem do consultor (`sender_type='user'`) = automação/salesbot → descartado; bot DEPOIS = template disparado pelo consultor → reclassificado como `sender_type='user'`, marcado `is_template=true`, atribuído ao consultor. Marcador `[MSG PRONTA]` no `conversation_text`.
+
+2. **Fase do funil por `status_id`/`pipeline_id`** (colunas que já existiam em `mensagens_atendimento_comercial` e não eram usadas). Fase do segmento = status/pipeline mais recente não nulo. Mapa `status_id → nome/categoria` em [`server/kommoStatusMap.js`](server/kommoStatusMap.js): estático (142=Ganho, 143=Perdido, 48566207=Aceite, 74941508=Aguardando resposta) + carga dinâmica via Kommo (`/api/v4/leads/pipelines`, cache 1h) em produção; cai no estático em dev sem token.
+
+3. **Perdido = categoria 'perdido' (status 143).** Penalidade determinística na nota (`FEEDBACK_JOB_LOST_PENALTY` default 1.5, `FEEDBACK_JOB_LOST_MAX_NOTA` default 7) além da instrução no prompt — não depende só do LLM.
+
+4. **Timezone:** `conversation_text` e novo `sent_at_sp` por mensagem em `America/Sao_Paulo` (o `sent_at` cru continua UTC ISO como fonte de verdade). Antes ia ISO cru ("...Z"), confundindo o dashboard.
+
+5. **Schema de saída da IA expandido:** `pontos_positivos[]` e `pontos_negativos[]` (jsonb), cada ponto com `{ titulo, categoria, severidade?, citacao }`. A `citacao` é trecho literal da conversa → dashboard grifa em vermelho os negativos. Mantidos `ponto_positivo`/`ponto_negativo` (texto, join dos títulos) por compatibilidade. Critérios do Word incorporados (humanidade, info errada, contradição, confusão, NPS, insistência, satisfação por demora, qualidade das prontas, conhecimento, perguntas de gancho).
+
+6. **Grounding pra detectar "informação errada"** ([`server/feedbackGrounding.js`](server/feedbackGrounding.js)): antes de avaliar, o job faz busca vetorial na MESMA base RAG do agente no Supabase PRINCIPAL (`match_documents` grad, `match_documents_pos` pós, `match_documents_perguntas` FAQ — 1 embedding, 3 RPCs) e injeta os trechos como "BASE DE CONHECIMENTO OFICIAL" no prompt. O avaliador só marca info errada quando há contradição clara com a base ou com as mensagens [MSG PRONTA] (templates aprovados). **PREÇO é excluído** (base de preços não é confiável — decisão do usuário): não consultamos `match_documents_precos` e ainda redigimos qualquer menção a valor/R$ no conteúdo. Toggle `FEEDBACK_JOB_GROUNDING_ENABLED` (default on), `FEEDBACK_JOB_GROUNDING_MAX_CHARS` (default 4000). Falha de grounding não derruba o segmento — só desliga a checagem de info errada naquela avaliação.
+
+**Contrato pro dashboard externo (colunas novas em `comercial_feedback`, migration `server/MIGRATION_2026-07-01_feedback_comercial.sql`):** `pontos_positivos` jsonb, `pontos_negativos` jsonb, `fase_lead_status_id` bigint, `fase_lead_nome` text, `fase_lead_categoria` text (`ganho|perdido|em_andamento`), `pipeline_id` bigint, `lead_perdido` bool. Mensagens em `conversa_completa.messages[]` ganham `sent_at_sp`, `is_template`, `raw_sender_type`, `status_id`. **Aplicar a migration ANTES do deploy** — sem as colunas o INSERT/UPDATE do job falha.
+
+**Alternativas descartadas:**
+- *Detectar "/" pelo texto* → o texto salvo é o template expandido, nunca começa com "/". Só `sender_type='bot'` funciona.
+- *Formatar timezone só no dashboard* → o `conversation_text` também vai pro LLM (que precisa raciocinar sobre horário útil SP); formatar na origem serve os dois.
+- *Confiar só no LLM pra baixar nota de perdido* → adicionada trava determinística por robustez.
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).

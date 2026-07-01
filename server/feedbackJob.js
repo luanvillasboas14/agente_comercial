@@ -24,6 +24,8 @@ import {
 } from './feedbackHelpers.js'
 
 import { resolveModel } from './ai/modelRegistry.js'
+import { loadKommoStatusMap, resolveFase } from './kommoStatusMap.js'
+import { fetchKnowledgeGrounding } from './feedbackGrounding.js'
 
 /** Janela temporal na busca: sent_at >= since OU (sent_at nulo E created_at >= since). Inclui linhas antigas só com created_at. */
 function buildMensagensWindowAndEntityFilter(sinceIso) {
@@ -47,6 +49,23 @@ function formatInstantBrasilia(iso) {
   } catch {
     return iso
   }
+}
+
+/**
+ * Monta o texto linear da conversa (o que vai pra IA e fica salvo em
+ * conversa_completa.conversation_text). Horários em America/Sao_Paulo
+ * (antes iam em UTC ISO cru — "2026-06-26T19:13:40.000Z" — o que confundia
+ * na leitura e no dashboard). Mensagens pré-prontas ("/") ganham o marcador
+ * [MSG PRONTA] pra IA e o dashboard saberem que foi template do consultor.
+ */
+function buildConversationText(messages, consultorName) {
+  return (messages || []).map((m) => {
+    const when = m.sent_at_sp || (m.sent_at ? formatInstantBrasilia(m.sent_at) : '')
+    const sender = m.sender_name || (String(m.sender_type).toLowerCase() === 'user' ? consultorName : 'Contato')
+    const tag = m.is_template ? ' [MSG PRONTA]' : ''
+    const content = m.content || m.message_text || (m.media_url ? `[MIDIA]: ${m.media_url}` : '[SEM CONTEUDO]')
+    return `${when} | ${sender} | ${m.sender_type}${tag}: ${content}`
+  }).join('\n')
 }
 
 function getAIConfig(env) {
@@ -422,11 +441,17 @@ export async function computeAdaptiveWindow(
 }
 
 function groupIntoSegments(rawRows) {
-  // Dedupe por message_uid (ou id)
+  // Dedupe por message_uid (ou id).
+  //
+  // ATENÇÃO: NÃO descartamos mais mensagens `bot` aqui. As mensagens
+  // pré-prontas do Kommo (os templates "/") chegam como sender_type='bot'
+  // / origin='bot'. Elas devem entrar na avaliação — mas SÓ depois da
+  // primeira mensagem do consultor (antes disso são automação/salesbot,
+  // "robô mesmo"). Esse recorte é feito lá embaixo, no loop de segmentação
+  // por entidade (ver reclassificação de bot → template do consultor).
   const deduped = new Map()
   for (const row of rawRows) {
     if (!row.contact_id && !row.lead_id) continue
-    if (String(row.sender_type || '').trim().toLowerCase() === 'bot') continue
     const key = row.message_uid ? `uid:${row.message_uid}` : `id:${row.id}`
     deduped.set(key, chooseBetterRow(deduped.get(key), row))
   }
@@ -457,7 +482,16 @@ function groupIntoSegments(rawRows) {
       response_time_seconds: numericOrNull(row.response_time_seconds),
       origin: row.origin ?? row.origem ?? null,
       pipeline_id: row.pipeline_id ?? null,
+      status_id: row.status_id ?? null,
+      // sender_type original preservado. Mensagens bot podem ser
+      // reclassificadas como 'user' (template do consultor) no loop de
+      // segmentação; raw_sender_type mantém a origem real pra auditoria.
+      raw_sender_type: row.sender_type ?? null,
+      is_template: false,
+      // Horário já formatado em America/Sao_Paulo pro dashboard externo
+      // não precisar converter (o sent_at cru continua em UTC ISO).
       sent_at: toIso(row.sent_at),
+      sent_at_sp: row.sent_at ? formatInstantBrasilia(toIso(row.sent_at)) : null,
       created_at: toIso(row.created_at),
     }
   })
@@ -489,6 +523,10 @@ function groupIntoSegments(rawRows) {
     let currentSegment = null
     let pendingBeforeFirstConsultor = []
     let segmentIndex = 0
+    // Marca se já vimos uma mensagem REAL do consultor (sender_type='user')
+    // nesta entidade. Enquanto não vimos, qualquer bot é automação/salesbot
+    // e é descartado. Depois da 1ª do consultor, bots viram template "/".
+    let seenUserMsg = false
 
     function flushCurrent() {
       if (!currentSegment || !currentSegment.messages.length) return
@@ -505,6 +543,18 @@ function groupIntoSegments(rawRows) {
       const contactId = sorted.find((m) => m.contact_id != null)?.contact_id ?? null
       const leadId = sorted.find((m) => m.lead_id != null)?.lead_id ?? null
 
+      // Fase do lead = status/pipeline mais recente com valor não nulo
+      // (a fase pode mudar ao longo da conversa; a última reflete onde o
+      // lead está agora). Usado pra filtro no dashboard e pra baixar a
+      // nota de quem foi pra "Perdido".
+      let faseStatusId = null
+      let fasePipelineId = null
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (faseStatusId == null && sorted[i].status_id != null) faseStatusId = sorted[i].status_id
+        if (fasePipelineId == null && sorted[i].pipeline_id != null) fasePipelineId = sorted[i].pipeline_id
+        if (faseStatusId != null && fasePipelineId != null) break
+      }
+
       output.push({
         entity_key: entityKey,
         entity_type: first.entity_type,
@@ -517,12 +567,34 @@ function groupIntoSegments(rawRows) {
         first_sent_at: first.sent_at,
         last_sent_at: last.sent_at,
         total_messages_segment: sorted.length,
+        fase_status_id: faseStatusId,
+        pipeline_id: fasePipelineId,
         messages: sorted,
       })
     }
 
     for (const msg of list) {
+      const isBot = String(msg.raw_sender_type || msg.sender_type || '').trim().toLowerCase() === 'bot'
+
+      if (isBot) {
+        // Bot ANTES da 1ª mensagem do consultor = automação/salesbot ("robô").
+        // Fica de fora da avaliação.
+        if (!currentSegment || !seenUserMsg) continue
+        // Bot DEPOIS = template pré-pronto ("/") que o consultor disparou.
+        // Reclassifica como mensagem do consultor e sinaliza que é template,
+        // pra avaliação (SLA, regras, IA) tratar como fala do consultor e o
+        // dashboard poder marcar visualmente que foi mensagem pronta.
+        msg.is_template = true
+        msg.sender_type = 'user'
+        msg.consultor_responsavel = currentSegment.consultor
+        if (!msg.sender_name) msg.sender_name = currentSegment.consultor
+        currentSegment.messages.push(msg)
+        continue
+      }
+
       const consultor = normalizeConsultor(msg.consultor_responsavel)
+      if (String(msg.sender_type || '').trim().toLowerCase() === 'user') seenUserMsg = true
+
       if (!currentSegment) {
         if (consultor) {
           segmentIndex += 1
@@ -695,12 +767,7 @@ async function prepareSegmentGravacao(sb, segmento) {
   const responseMetrics = calculateResponseMetrics(mergedMessages)
   const tempoMedio = responseMetrics.final_average_seconds ?? 0
 
-  const conversationText = mergedMessages.map((m) => {
-    const when = m.sent_at || ''
-    const sender = m.sender_name || (m.sender_type === 'user' ? consultorAtual : 'Contato')
-    const content = m.content || m.message_text || (m.media_url ? `[MIDIA]: ${m.media_url}` : '[SEM CONTEUDO]')
-    return `${when} | ${sender} | ${m.sender_type}: ${content}`
-  }).join('\n')
+  const conversationText = buildConversationText(mergedMessages, consultorAtual)
 
   const conversaCompleta = {
     entity_type: segmento.entity_type,
@@ -748,6 +815,9 @@ async function prepareSegmentGravacao(sb, segmento) {
     contact_id: segmento.contact_id ?? conversaExistente.contact_id ?? null,
     lead_id: segmento.lead_id ?? conversaExistente.lead_id ?? null,
     consultor: consultorAtual,
+    // Fase do funil (resolvida com nome/categoria mais adiante no runner).
+    fase_status_id: segmento.fase_status_id ?? null,
+    pipeline_id: segmento.pipeline_id ?? null,
     conversa_completa: conversaCompleta,
     conversation_text_for_ai: conversationText,
     tempo_medio_de_resposta: tempoMedio,
@@ -766,6 +836,8 @@ async function prepareSegmentGravacao(sb, segmento) {
     nota_avaliacao: row?.nota_avaliacao ?? null,
     ponto_positivo: row?.ponto_positivo ?? null,
     ponto_negativo: row?.ponto_negativo ?? null,
+    pontos_positivos: row?.pontos_positivos ?? null,
+    pontos_negativos: row?.pontos_negativos ?? null,
     first_sent_at: firstSentAt,
     last_sent_at: lastSentAt,
     // Metadados pra decidir skip de re-avaliação no main runner:
@@ -812,12 +884,7 @@ async function mergeWithPendente(sb, base) {
     return Number(a.source_id || 0) - Number(b.source_id || 0)
   })
 
-  const conversationText = mergedMessages.map((m) => {
-    const when = m.sent_at || ''
-    const sender = m.sender_name || (m.sender_type === 'user' ? base.consultor : 'Contato')
-    const content = m.content || m.message_text || (m.media_url ? `[MIDIA]: ${m.media_url}` : '[SEM CONTEUDO]')
-    return `${when} | ${sender} | ${m.sender_type}: ${content}`
-  }).join('\n')
+  const conversationText = buildConversationText(mergedMessages, base.consultor)
 
   return {
     ...base,
@@ -1138,9 +1205,16 @@ async function computeCommercialRules(sb, base) {
 /* ───────────── Step 7: Chamar OpenAI ───────────── */
 
 function buildPrompt(base) {
-  return `Você avalia a qualidade de um atendimento comercial humano via WhatsApp.
+  const fase = base.fase_lead_nome || 'não identificada'
+  const perdido = base.lead_perdido === true
+  const grounding = String(base.knowledge_grounding || '').trim()
+  const baseConhecimentoBloco = grounding
+    ? `\nBASE DE CONHECIMENTO OFICIAL (fonte de verdade — trechos da nossa base de cursos, SEM preços):\n${grounding}\n`
+    : '\nBASE DE CONHECIMENTO OFICIAL: indisponível para este atendimento. NÃO acuse "informação errada" por falta de base — só marque contradição interna evidente na própria conversa.\n'
+  return `Você avalia a qualidade de um atendimento comercial humano via WhatsApp. Seja RIGOROSO: notas altas só para atendimentos realmente bons. Na dúvida entre duas notas, escolha a menor.
 
 Consultor: ${base.consultor}
+Fase atual do lead no funil: ${fase}${perdido ? ' (VENDA PERDIDA)' : ''}
 
 Métricas objetivas:
 - tempo_medio_resposta_segundos: ${base.tempo_medio_de_resposta}
@@ -1167,31 +1241,54 @@ Regras comerciais:
 - score_regras_comerciais: ${base.score_interno_regras_comerciais}
 - resumo_regras: ${base.resumo_regras_para_ia}
 
-Critérios:
-1. Avalie só o atendimento humano.
-2. Ignore bots e automações.
-3. Penalize respostas acima de 1 hora em horário útil.
-4. Não penalize mensagens recebidas entre 18:00 e 08:59 em America/Sao_Paulo.
-5. Não penalize domingo; domingo inteiro é fora do horário útil.
-6. Penalize conversa parada há mais de 1 dia sem follow-up suficiente.
-7. Penalize primeiro follow-up acima de 1 dia.
-8. Penalize quando o lead falou em horário útil e o consultor só retomou em outro dia.
-9. Penalize quando enviou link/site e demorou para retomar.
-10. Penalize fechamento fraco, sem próximo passo claro.
-11. Penalize abandono precoce.
-12. Não penalize falta de follow-up quando o lead deixou claro que não quer continuar.
-13. Use o score e o resumo das regras como evidência objetiva, sem copiar mecanicamente a nota final.
-14. Considere também cordialidade, clareza, objetividade, profundidade, continuidade, condução comercial e tentativa de avançar a venda.
+CONTEXTO IMPORTANTE SOBRE A CONVERSA:
+- Mensagens marcadas com [MSG PRONTA] são templates prontos ("/") disparados PELO CONSULTOR. Elas contam como fala do consultor e devem ser avaliadas (qualidade da apresentação, da pergunta sobre curso de interesse, das explicações, etc.). Como são textos oficiais aprovados pela empresa, podem ser usadas como referência do que é correto.
+- Mensagens de automação/robô ANTES da primeira fala do consultor já foram removidas — tudo que está aqui é atendimento humano (digitado ou template do consultor).
+${baseConhecimentoBloco}
+
+Critérios de PENALIZAÇÃO (tempo/rotina):
+1. Penalize respostas acima de 1 hora em horário útil.
+2. Não penalize mensagens recebidas entre 18:00 e 08:59 em America/Sao_Paulo.
+3. Não penalize domingo; domingo inteiro é fora do horário útil.
+4. Penalize conversa parada há mais de 1 dia sem follow-up suficiente e primeiro follow-up acima de 1 dia.
+5. Penalize quando o lead falou em horário útil e o consultor só retomou em outro dia.
+6. Penalize quando enviou link/site e demorou para retomar.
+7. Penalize fechamento fraco, sem próximo passo comercial claro.
+8. Penalize abandono precoce.
+9. NÃO penalize falta de follow-up quando o lead deixou claro que não quer continuar.
+
+Critérios de QUALIDADE — gere pontos positivos E negativos com base neles (quando houver evidência):
+10. Humanidade: preocupação genuína com o cliente, criar proximidade, empatia e engajamento na conversa (positivo se presente, negativo se robótico/frio).
+11. Informação divulgada de forma ERRADA = ponto negativo (severidade alta). Compare o que o consultor afirmou (modalidade, duração, área, grau, existência de estágio, existência de grade, regras) com a BASE DE CONHECIMENTO OFICIAL acima e com as mensagens [MSG PRONTA]. Só acuse erro quando houver CONTRADIÇÃO clara com essas fontes. NÃO avalie PREÇO/valor/mensalidade (a base de preços não é confiável aqui — ignore qualquer divergência de valores). Se a base não cobre o que foi dito, não invente erro.
+12. Áudios longos/confusos ou mensagens confusas e mal escritas = ponto negativo.
+13. Contradição entre mensagens ao longo da conversa (diz uma coisa e depois outra) = ponto negativo.
+14. Satisfação/insatisfação do cliente ao longo do atendimento (sentimento tipo NPS): reconheça sinais e aponte como positivo ou negativo.
+15. Insistência/persistência do consultor mesmo com pouco interesse do lead, buscando a conversão = ponto positivo (desde que não seja inconveniente).
+16. Reconhecer a demora e se desculpar/dar satisfação ao cliente por ter demorado = positivo; ignorar a própria demora = negativo.
+17. Qualidade das mensagens prontas (apresentação, pergunta sobre curso de interesse, explicações) = positivo ou negativo conforme a qualidade.
+18. Conhecimento do tema e confiança sobre o que está falando = ponto positivo.
+19. Fazer perguntas ao final das falas para estimular o cliente a responder e avançar ("O que achou?", "Podemos seguir?") = positivo; encerrar sem gancho = negativo.
+20. Considere também cordialidade, clareza, objetividade, profundidade e condução comercial.
+
+Regras de NOTA:
+- Use o score e o resumo das regras como evidência objetiva, sem copiar mecanicamente a nota final.
+- Se o lead está em VENDA PERDIDA, a nota deve ser MENOR: o atendimento não converteu. Reduza a nota e explique na avaliação o que pode ter contribuído para a perda.
+- Gere VÁRIOS pontos (não apenas um de cada): liste todos os pontos positivos e negativos que encontrar com evidência.
+- Em CADA ponto negativo, o campo "citacao" DEVE conter um TRECHO EXATO copiado literalmente da conversa (apenas o conteúdo da mensagem, sem o "data | remetente |"), para que o trecho possa ser grifado. Se realmente não houver trecho específico, use "".
 
 Conversa:
 ${base.conversation_text_for_ai}
 
-Retorne somente JSON válido:
+Retorne SOMENTE JSON válido no formato:
 {
-  "avaliacao": "texto",
+  "avaliacao": "texto resumindo a avaliação geral",
   "nota_avaliacao": 0,
-  "ponto_positivo": "texto curto",
-  "ponto_negativo": "texto curto"
+  "pontos_positivos": [
+    { "titulo": "texto curto", "categoria": "humanidade|conhecimento|insistencia|satisfacao_cliente|qualidade_mensagem|tempo_resposta|conducao_comercial|outro", "citacao": "trecho exato ou vazio" }
+  ],
+  "pontos_negativos": [
+    { "titulo": "texto curto", "categoria": "informacao_errada|contradicao|confusao|humanidade|tempo_resposta|followup|fechamento|satisfacao_cliente|outro", "severidade": "alta|media|baixa", "citacao": "trecho exato da conversa que causou o problema" }
+  ]
 }`
 }
 
@@ -1288,6 +1385,77 @@ function parseAIJson(text) {
   return null
 }
 
+/**
+ * Normaliza a saída da IA para o novo schema (arrays de pontos +/- com
+ * citação/severidade), mantendo compatibilidade com o formato antigo
+ * (ponto_positivo/ponto_negativo em texto). Também:
+ *  - garante nota numérica 0–10;
+ *  - aplica penalidade determinística quando o lead está PERDIDO (a IA já
+ *    é instruída a baixar, mas aqui garantimos independente do modelo).
+ */
+function normalizeAIResult(parsed, base, env = {}) {
+  const p = parsed || {}
+
+  const normPoint = (item) => {
+    if (item == null) return null
+    if (typeof item === 'string') {
+      const t = item.trim()
+      return t ? { titulo: t, categoria: 'outro', citacao: '' } : null
+    }
+    const titulo = String(item.titulo || item.texto || item.descricao || '').trim()
+    if (!titulo) return null
+    return {
+      titulo,
+      categoria: String(item.categoria || 'outro').trim() || 'outro',
+      severidade: item.severidade ? String(item.severidade).toLowerCase() : undefined,
+      citacao: String(item.citacao || '').trim(),
+    }
+  }
+
+  const toArray = (arr, legacyText) => {
+    let list = []
+    if (Array.isArray(arr)) list = arr.map(normPoint).filter(Boolean)
+    if (list.length === 0 && legacyText) {
+      const t = String(legacyText).trim()
+      if (t) list = [{ titulo: t, categoria: 'outro', citacao: '' }]
+    }
+    return list
+  }
+
+  const positivos = toArray(p.pontos_positivos, p.ponto_positivo)
+  const negativos = toArray(p.pontos_negativos, p.ponto_negativo)
+
+  // nota numérica
+  let nota = Number(p.nota_avaliacao)
+  if (!Number.isFinite(nota)) nota = null
+
+  // Penalidade determinística de venda perdida.
+  if (nota != null && base?.lead_perdido === true) {
+    const penalty = (() => {
+      const v = Number(env.FEEDBACK_JOB_LOST_PENALTY)
+      return Number.isFinite(v) && v >= 0 ? v : 1.5
+    })()
+    const maxNota = (() => {
+      const v = Number(env.FEEDBACK_JOB_LOST_MAX_NOTA)
+      return Number.isFinite(v) && v >= 0 ? v : 7
+    })()
+    nota = clamp(Number((nota - penalty).toFixed(2)), 0, maxNota)
+  }
+  if (nota != null) nota = clamp(Number(nota.toFixed(2)), 0, 10)
+
+  // Compat: campos texto (usados pela UI atual e por consumidores antigos).
+  const joinTitulos = (list) => list.map((x) => x.titulo).filter(Boolean).join(' | ') || null
+
+  return {
+    avaliacao: p.avaliacao != null ? String(p.avaliacao) : null,
+    nota_avaliacao: nota,
+    pontos_positivos: positivos,
+    pontos_negativos: negativos,
+    ponto_positivo: joinTitulos(positivos),
+    ponto_negativo: joinTitulos(negativos),
+  }
+}
+
 /* ───────────── Step 8: Gravar feedback ───────────── */
 
 async function saveFeedback(sb, base, jobExecutionId) {
@@ -1300,6 +1468,13 @@ async function saveFeedback(sb, base, jobExecutionId) {
     nota_avaliacao: base.nota_avaliacao ?? null,
     ponto_positivo: base.ponto_positivo ?? null,
     ponto_negativo: base.ponto_negativo ?? null,
+    pontos_positivos: base.pontos_positivos ?? null,
+    pontos_negativos: base.pontos_negativos ?? null,
+    fase_lead_status_id: base.fase_lead_status_id ?? null,
+    fase_lead_nome: base.fase_lead_nome ?? null,
+    fase_lead_categoria: base.fase_lead_categoria ?? null,
+    pipeline_id: base.pipeline_id ?? null,
+    lead_perdido: base.lead_perdido ?? null,
     tempo_medio_de_resposta: base.tempo_medio_de_resposta ?? null,
     job_execution_id: jobExecutionId,
     updated_at: new Date().toISOString(),
@@ -1473,6 +1648,10 @@ export async function runFeedbackJob(env, trigger = 'cron') {
     totalSegments = segments.length
     addStep('group_segments', { count: totalSegments })
 
+    // Carrega 1x o mapa de fases do funil (nome/categoria por status_id).
+    // Em produção busca do Kommo; em dev cai no mapa estático. Nunca lança.
+    const statusMap = await loadKommoStatusMap(env)
+
     // Skip de re-avaliação: se o atendimento já tem feedback prévio e
     // poucas mensagens humanas foram adicionadas, atualiza só conversa
     // + métricas (sem chamar a OpenAI). Evita gastar token e oscilar a
@@ -1503,6 +1682,13 @@ export async function runFeedbackJob(env, trigger = 'cron') {
 
         base = await computeCommercialRules(sb, base)
 
+        // Resolve a fase do funil (nome + categoria) e marca lead perdido.
+        const fase = resolveFase(statusMap, base.fase_status_id)
+        base.fase_lead_status_id = fase.status_id
+        base.fase_lead_nome = fase.nome
+        base.fase_lead_categoria = fase.categoria
+        base.lead_perdido = fase.perdido
+
         // Decide se vale a pena chamar OpenAI de novo. Se já tinha
         // feedback antes e nada relevante foi adicionado, mantemos a
         // avaliação anterior — só atualizamos conversa_completa e
@@ -1513,6 +1699,22 @@ export async function runFeedbackJob(env, trigger = 'cron') {
           base.new_human_messages_count < minNewHumanForReaval
 
         if (!skipReaval) {
+          // Grounding: busca na base de conhecimento (RAG, sem preço) pra o
+          // avaliador conseguir apontar informação divulgada errada. Falha
+          // aqui não derruba o segmento — só desliga a checagem de info errada.
+          base.knowledge_grounding = null
+          if (String(env.FEEDBACK_JOB_GROUNDING_ENABLED ?? 'true').toLowerCase() !== 'false') {
+            try {
+              const g = await fetchKnowledgeGrounding(env, base.conversation_text_for_ai, {
+                maxChars: Number(env.FEEDBACK_JOB_GROUNDING_MAX_CHARS) || 4000,
+              })
+              base.knowledge_grounding = g.block
+              if (g.error) console.warn(`[FeedbackJob] grounding indisponível (${segLabel}): ${g.error}`)
+            } catch (e) {
+              console.warn(`[FeedbackJob] grounding falhou (${segLabel}): ${e.message}`)
+            }
+          }
+
           aiCalls++
           const { content, usage } = await callOpenAIFeedback(env, base)
           if (usage) {
@@ -1521,10 +1723,13 @@ export async function runFeedbackJob(env, trigger = 'cron') {
             totalTokens += usage.total_tokens || ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0))
           }
           const parsed = parseAIJson(content) || {}
-          base.avaliacao = parsed.avaliacao ?? null
-          base.nota_avaliacao = parsed.nota_avaliacao ?? null
-          base.ponto_positivo = parsed.ponto_positivo ?? null
-          base.ponto_negativo = parsed.ponto_negativo ?? null
+          const norm = normalizeAIResult(parsed, base, env)
+          base.avaliacao = norm.avaliacao
+          base.nota_avaliacao = norm.nota_avaliacao
+          base.pontos_positivos = norm.pontos_positivos
+          base.pontos_negativos = norm.pontos_negativos
+          base.ponto_positivo = norm.ponto_positivo
+          base.ponto_negativo = norm.ponto_negativo
         } else {
           feedbacksSkipped++
         }
