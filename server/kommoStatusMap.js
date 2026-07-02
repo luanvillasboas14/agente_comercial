@@ -23,7 +23,7 @@
 export const KNOWN_STATUS = {
   142: { name: 'Ganho', categoria: 'ganho' },
   143: { name: 'Perdido', categoria: 'perdido' },
-  48566207: { name: 'Aceite', categoria: 'em_andamento' },
+  48566207: { name: 'Aceite', categoria: 'ganho' },
   74941508: { name: 'Aguardando resposta', categoria: 'em_andamento' },
 }
 
@@ -35,9 +35,13 @@ export function categorizeStatus(statusId, name) {
   const id = Number(statusId)
   if (id === 142) return 'ganho'
   if (id === 143) return 'perdido'
+  // Aceite (48566207): quem chega aqui já fechou — trata como 'ganho' pra
+  // efeito de nota (bônus) e exibição de fase. Depois do aceite o lead sobe
+  // pra "Ganho" (142) no dia seguinte.
+  if (id === 48566207) return 'ganho'
   const n = String(name || '').toLowerCase()
   if (/perdid|lost|descartad/.test(n)) return 'perdido'
-  if (/ganho|won|venda ganha|matriculad|sucesso|fechad/.test(n)) return 'ganho'
+  if (/ganho|won|venda ganha|matriculad|sucesso|fechad|aceite|aceit/.test(n)) return 'ganho'
   return 'em_andamento'
 }
 

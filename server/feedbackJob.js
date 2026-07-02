@@ -61,8 +61,11 @@ function formatInstantBrasilia(iso) {
 function buildConversationText(messages, consultorName) {
   return (messages || []).map((m) => {
     const when = m.sent_at_sp || (m.sent_at ? formatInstantBrasilia(m.sent_at) : '')
-    const sender = m.sender_name || (String(m.sender_type).toLowerCase() === 'user' ? consultorName : 'Contato')
-    const tag = m.is_template ? ' [MSG PRONTA]' : ''
+    const isCtx = m.is_context_only === true
+    const sender = isCtx
+      ? (m.sender_name || 'Robô/Automação')
+      : (m.sender_name || (String(m.sender_type).toLowerCase() === 'user' ? consultorName : 'Contato'))
+    const tag = isCtx ? ' [ROBÔ - CONTEXTO, NÃO AVALIAR]' : (m.is_template ? ' [MSG PRONTA]' : '')
     const content = m.content || m.message_text || (m.media_url ? `[MIDIA]: ${m.media_url}` : '[SEM CONTEUDO]')
     return `${when} | ${sender} | ${m.sender_type}${tag}: ${content}`
   }).join('\n')
@@ -488,6 +491,7 @@ function groupIntoSegments(rawRows) {
       // segmentação; raw_sender_type mantém a origem real pra auditoria.
       raw_sender_type: row.sender_type ?? null,
       is_template: false,
+      is_context_only: false,
       // Horário já formatado em America/Sao_Paulo pro dashboard externo
       // não precisar converter (o sent_at cru continua em UTC ISO).
       sent_at: toIso(row.sent_at),
@@ -577,14 +581,23 @@ function groupIntoSegments(rawRows) {
       const isBot = String(msg.raw_sender_type || msg.sender_type || '').trim().toLowerCase() === 'bot'
 
       if (isBot) {
-        // Bot ANTES da 1ª mensagem do consultor = automação/salesbot ("robô").
-        // Fica de fora da avaliação.
-        if (!currentSegment || !seenUserMsg) continue
+        // Bot ANTES da 1ª mensagem do consultor = automação/salesbot ("robô puro").
+        // NÃO é avaliado nem contado (mantém sender_type='bot', então fica fora
+        // de todas as contagens que filtram por contact/user), mas ENTRA como
+        // CONTEXTO pra IA e o dashboard entenderem o histórico da conversa.
+        if (!currentSegment || !seenUserMsg) {
+          msg.is_context_only = true
+          msg.is_template = false
+          if (currentSegment) currentSegment.messages.push(msg)
+          else pendingBeforeFirstConsultor.push(msg)
+          continue
+        }
         // Bot DEPOIS = template pré-pronto ("/") que o consultor disparou.
         // Reclassifica como mensagem do consultor e sinaliza que é template,
         // pra avaliação (SLA, regras, IA) tratar como fala do consultor e o
         // dashboard poder marcar visualmente que foi mensagem pronta.
         msg.is_template = true
+        msg.is_context_only = false
         msg.sender_type = 'user'
         msg.consultor_responsavel = currentSegment.consultor
         if (!msg.sender_name) msg.sender_name = currentSegment.consultor
@@ -1243,7 +1256,7 @@ Regras comerciais:
 
 CONTEXTO IMPORTANTE SOBRE A CONVERSA:
 - Mensagens marcadas com [MSG PRONTA] são templates prontos ("/") disparados PELO CONSULTOR. Elas contam como fala do consultor e devem ser avaliadas (qualidade da apresentação, da pergunta sobre curso de interesse, das explicações, etc.). Como são textos oficiais aprovados pela empresa, podem ser usadas como referência do que é correto.
-- Mensagens de automação/robô ANTES da primeira fala do consultor já foram removidas — tudo que está aqui é atendimento humano (digitado ou template do consultor).
+- Mensagens marcadas com [ROBÔ - CONTEXTO, NÃO AVALIAR] são automação/salesbot (disparadas pelo sistema, NÃO pelo consultor). Servem APENAS como contexto pra você entender a conversa. NÃO as avalie, NÃO as conte como mensagem do consultor e NÃO gere pontos (positivos ou negativos) a partir delas.
 ${baseConhecimentoBloco}
 
 Critérios de PENALIZAÇÃO (tempo/rotina):
@@ -1263,7 +1276,10 @@ Critérios de QUALIDADE — gere pontos positivos E negativos com base neles (qu
 12. Áudios longos/confusos ou mensagens confusas e mal escritas = ponto negativo.
 13. Contradição entre mensagens ao longo da conversa (diz uma coisa e depois outra) = ponto negativo.
 14. Satisfação/insatisfação do cliente ao longo do atendimento (sentimento tipo NPS): reconheça sinais e aponte como positivo ou negativo.
-15. Insistência/persistência do consultor mesmo com pouco interesse do lead, buscando a conversão = ponto positivo (desde que não seja inconveniente).
+15. Insistência na venda (importante, avalie sempre que o lead recusar):
+    - Se o cliente disse que NÃO tem interesse e o consultor TENTOU reverter/insistir (contornou a objeção ou tentou ao menos mais uma vez) antes de agradecer e encerrar/mandar pra Perdido = POSITIVO ("Atendente insistiu na venda"). NÃO trate o agradecimento final como erro nesse caso.
+    - Se o cliente recusou UMA vez e o consultor apenas AGRADECEU e encerrou/mandou pra Perdido SEM insistir = NEGATIVO: gere o ponto negativo "Atendente não insistiu na venda" (categoria "insistencia") e coloque na "citacao" o trecho do AGRADECIMENTO/encerramento do CONSULTOR que mostra a desistência precoce.
+    - Insistir de forma inconveniente/spam, ignorando recusa clara e repetida, também é negativo.
 16. Reconhecer a demora e se desculpar/dar satisfação ao cliente por ter demorado = positivo; ignorar a própria demora = negativo.
 17. Qualidade das mensagens prontas (apresentação, pergunta sobre curso de interesse, explicações) = positivo ou negativo conforme a qualidade.
 18. Conhecimento do tema e confiança sobre o que está falando = ponto positivo.
@@ -1273,8 +1289,9 @@ Critérios de QUALIDADE — gere pontos positivos E negativos com base neles (qu
 Regras de NOTA:
 - Use o score e o resumo das regras como evidência objetiva, sem copiar mecanicamente a nota final.
 - Se o lead está em VENDA PERDIDA, a nota deve ser MENOR: o atendimento não converteu. Reduza a nota e explique na avaliação o que pode ter contribuído para a perda.
+- Se o lead está GANHO (venda fechada), reconheça os acertos que levaram à conversão; o atendimento tende a merecer nota maior, sem inflar sem evidência.
 - Gere VÁRIOS pontos (não apenas um de cada): liste todos os pontos positivos e negativos que encontrar com evidência.
-- Em CADA ponto negativo, o campo "citacao" DEVE conter um TRECHO EXATO copiado literalmente da conversa (apenas o conteúdo da mensagem, sem o "data | remetente |"), para que o trecho possa ser grifado. Se realmente não houver trecho específico, use "".
+- Em CADA ponto negativo, o campo "citacao" DEVE conter um TRECHO EXATO, copiado literalmente, de uma mensagem DO ATENDENTE/CONSULTOR (a fala com remetente "user") que causou o problema — apenas o conteúdo, sem o "data | remetente |". NUNCA cite mensagem do CLIENTE (remetente "contact") nem mensagens de contexto marcadas [ROBÔ - CONTEXTO]. O trecho citado deve ser exatamente o que fez o atendente perder nota — pode ser uma informação errada, uma contradição, OU um agradecimento/encerramento em que ele DESISTIU da venda sem insistir (ver critério 15). NÃO grife elogios nem trechos que representem um ACERTO do atendente (ex.: um agradecimento após ele ter insistido é acerto, não grife). Se o problema não tiver um trecho específico do atendente (ex.: demora pra responder), use "".
 
 Conversa:
 ${base.conversation_text_for_ai}
@@ -1287,7 +1304,7 @@ Retorne SOMENTE JSON válido no formato:
     { "titulo": "texto curto", "categoria": "humanidade|conhecimento|insistencia|satisfacao_cliente|qualidade_mensagem|tempo_resposta|conducao_comercial|outro", "citacao": "trecho exato ou vazio" }
   ],
   "pontos_negativos": [
-    { "titulo": "texto curto", "categoria": "informacao_errada|contradicao|confusao|humanidade|tempo_resposta|followup|fechamento|satisfacao_cliente|outro", "severidade": "alta|media|baixa", "citacao": "trecho exato da conversa que causou o problema" }
+    { "titulo": "texto curto", "categoria": "informacao_errada|contradicao|confusao|humanidade|tempo_resposta|followup|fechamento|insistencia|satisfacao_cliente|outro", "severidade": "alta|media|baixa", "citacao": "trecho exato da fala do ATENDENTE que causou o problema, ou vazio" }
   ]
 }`
 }
@@ -1425,6 +1442,30 @@ function normalizeAIResult(parsed, base, env = {}) {
   const positivos = toArray(p.pontos_positivos, p.ponto_positivo)
   const negativos = toArray(p.pontos_negativos, p.ponto_negativo)
 
+  // Guarda de grifo: a citação de um ponto NEGATIVO só faz sentido se for um
+  // trecho de uma mensagem do ATENDENTE (consultor) — nunca do cliente nem de
+  // contexto. Isso evita o dashboard grifar mensagem do cliente/agradecimento.
+  // Se a citação não bater com nenhuma fala do consultor, zera (o ponto
+  // continua aparecendo na lista, só não grifa nada).
+  const _normText = (s) => String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const _msgs = Array.isArray(base?.conversa_completa?.messages) ? base.conversa_completa.messages : []
+  const _consultorTexts = _msgs
+    .filter((m) => String(m.sender_type || '').toLowerCase() === 'user' && m.is_context_only !== true)
+    .map((m) => _normText(m.content || m.message_text || m.media_url || ''))
+    .filter((t) => t.length > 0)
+  const _citacaoDeConsultor = (cit) => {
+    const c = _normText(cit)
+    if (c.length < 4) return false
+    return _consultorTexts.some((t) => t.includes(c))
+  }
+  for (const neg of negativos) {
+    if (neg.citacao && !_citacaoDeConsultor(neg.citacao)) neg.citacao = ''
+  }
+
   // nota numérica
   let nota = Number(p.nota_avaliacao)
   if (!Number.isFinite(nota)) nota = null
@@ -1440,6 +1481,20 @@ function normalizeAIResult(parsed, base, env = {}) {
       return Number.isFinite(v) && v >= 0 ? v : 7
     })()
     nota = clamp(Number((nota - penalty).toFixed(2)), 0, maxNota)
+  }
+
+  // Bônus determinístico de venda GANHA (espelha a penalidade do Perdido):
+  // o atendimento converteu, então tende a nota maior, com piso mínimo.
+  if (nota != null && String(base?.fase_lead_categoria || '').trim().toLowerCase() === 'ganho') {
+    const bonus = (() => {
+      const v = Number(env.FEEDBACK_JOB_WON_BONUS)
+      return Number.isFinite(v) && v >= 0 ? v : 1
+    })()
+    const minNota = (() => {
+      const v = Number(env.FEEDBACK_JOB_WON_MIN_NOTA)
+      return Number.isFinite(v) && v >= 0 ? v : 6
+    })()
+    nota = clamp(Number(Math.max(nota + bonus, minNota).toFixed(2)), 0, 10)
   }
   if (nota != null) nota = clamp(Number(nota.toFixed(2)), 0, 10)
 

@@ -116,6 +116,27 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
 - *Formatar timezone só no dashboard* → o `conversation_text` também vai pro LLM (que precisa raciocinar sobre horário útil SP); formatar na origem serve os dois.
 - *Confiar só no LLM pra baixar nota de perdido* → adicionada trava determinística por robustez.
 
+### 2026-07-02 — Robô como contexto não-avaliado + bônus de nota para lead ganho
+
+- Data: 2026-07-02
+- Modelo usado: Opus 4.8 (principal)
+- Decisão:
+  - Mensagens de automação/salesbot ("robô puro", que chegam antes da primeira fala do consultor) deixam de ser descartadas e passam a entrar na conversa como CONTEXTO (`is_context_only=true`, `sender_type='bot'`), marcadas com `[ROBÔ - CONTEXTO, NÃO AVALIAR]`. Não são avaliadas nem contadas (as contagens de avaliação já filtram por contact/user). Servem só pra dar contexto à IA e ao dashboard.
+  - As mensagens "/" pré-prontas (bot disparado pelo consultor depois da 1ª fala dele) CONTINUAM sendo reclassificadas como fala do consultor e avaliadas (`is_template=true`) — decisão anterior mantida.
+  - Lead em fase GANHO agora recebe bônus determinístico de nota em `normalizeAIResult`, espelhando a penalidade do Perdido: soma `FEEDBACK_JOB_WON_BONUS` (default 1) e aplica piso `FEEDBACK_JOB_WON_MIN_NOTA` (default 6). Perdido continua com penalidade `FEEDBACK_JOB_LOST_PENALTY` (1.5) e teto `FEEDBACK_JOB_LOST_MAX_NOTA` (7).
+- Alternativas descartadas:
+  - Tratar TODAS as mensagens de robô/template como contexto (inclusive as "/") — descartada: o usuário confirmou que as "/" são fala do consultor e devem ser avaliadas.
+  - Bônus de ganho só via instrução no prompt (sem valor determinístico) — descartada: o usuário pediu bônus determinístico como no Perdido.
+
+### 2026-07-02 (ajuste) — Aceite conta como ganho + grifo só em fala do atendente
+
+- Data: 2026-07-02
+- Modelo usado: Opus 4.8 (principal)
+- Decisão:
+  - A fase "Aceite" (status 48566207) passa a ser categorizada como 'ganho' (em kommoStatusMap: KNOWN_STATUS + categorizeStatus, inclusive na carga dinâmica). Assim recebe o bônus de nota e aparece como ganho no dashboard. Motivo: quem aceita já fechou; depois sobe pra "Ganho" (142).
+  - Grifo de ponto negativo: a `citacao` de um ponto negativo só é mantida se corresponder a uma fala do ATENDENTE (sender_type 'user', excluindo contexto). Citação que bate só com mensagem do cliente — ou não bate com nenhuma fala do consultor — é zerada em normalizeAIResult. Evita grifar mensagem do cliente.
+  - Insistência na venda (refinamento do agradecimento): agradecimento/encerramento do consultor NÃO é sempre negativo. Se o cliente recusou UMA vez e o consultor só agradeceu e mandou pra Perdido SEM insistir = negativo "Atendente não insistiu na venda" (categoria `insistencia`), com o agradecimento grifado. Se o consultor tentou reverter/insistir antes de encerrar = positivo, sem grifo. Prompt (critério 15 + instrução de citação) atualizado; a trava server-side mantém o agradecimento do consultor como citação válida (é fala 'user').
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).
