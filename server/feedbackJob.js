@@ -1269,6 +1269,7 @@ Critérios de PENALIZAÇÃO (tempo/rotina):
 7. Penalize fechamento fraco, sem próximo passo comercial claro.
 8. Penalize abandono precoce.
 9. NÃO penalize falta de follow-up quando o lead deixou claro que não quer continuar.
+- IMPORTANTE: NÃO considere negativo o CONSULTOR ENVIAR mensagens fora do horário útil (madrugada, fim de semana, domingo). O horário em que o consultor envia NÃO é problema; só avalie a DEMORA de resposta dentro do horário útil (critério 1). Nunca gere um ponto negativo do tipo "mensagens enviadas fora do horário".
 
 Critérios de QUALIDADE — gere pontos positivos E negativos com base neles (quando houver evidência):
 10. Humanidade: preocupação genuína com o cliente, criar proximidade, empatia e engajamento na conversa (positivo se presente, negativo se robótico/frio).
@@ -1291,6 +1292,7 @@ Regras de NOTA:
 - Se o lead está em VENDA PERDIDA, a nota deve ser MENOR: o atendimento não converteu. Reduza a nota e explique na avaliação o que pode ter contribuído para a perda.
 - Se o lead está GANHO (venda fechada), reconheça os acertos que levaram à conversão; o atendimento tende a merecer nota maior, sem inflar sem evidência.
 - Gere VÁRIOS pontos (não apenas um de cada): liste todos os pontos positivos e negativos que encontrar com evidência.
+- NÃO repita o mesmo problema em mais de um ponto. Cada ponto (positivo ou negativo) deve tratar de um problema DISTINTO. Consolide variações do mesmo problema num ÚNICO ponto — ex.: um único ponto sobre áudio confuso (nunca dois), um único sobre demora de resposta (nunca dois).
 - Em CADA ponto negativo, o campo "citacao" DEVE conter um TRECHO EXATO, copiado literalmente, de uma mensagem DO ATENDENTE/CONSULTOR (a fala com remetente "user") que causou o problema — apenas o conteúdo, sem o "data | remetente |". NUNCA cite mensagem do CLIENTE (remetente "contact") nem mensagens de contexto marcadas [ROBÔ - CONTEXTO]. O trecho citado deve ser exatamente o que fez o atendente perder nota — pode ser uma informação errada, uma contradição, OU um agradecimento/encerramento em que ele DESISTIU da venda sem insistir (ver critério 15). NÃO grife elogios nem trechos que representem um ACERTO do atendente (ex.: um agradecimento após ele ter insistido é acerto, não grife). Se o problema não tiver um trecho específico do atendente (ex.: demora pra responder), use "".
 
 Conversa:
@@ -1466,6 +1468,49 @@ function normalizeAIResult(parsed, base, env = {}) {
     if (neg.citacao && !_citacaoDeConsultor(neg.citacao)) neg.citacao = ''
   }
 
+  // Limpeza de pontos: (1) o consultor ENVIAR mensagens fora do horário útil
+  // não é ponto negativo (só a demora de resposta em horário útil conta);
+  // (2) deduplica pontos que tratam do MESMO problema, pra a IA não avaliar a
+  // mesma coisa duas vezes (ex.: dois pontos de "áudio confuso" ou de "demora").
+  const _SEV = { alta: 3, media: 2, baixa: 1 }
+  const _STOP = new Set(['de', 'da', 'do', 'das', 'dos', 'a', 'o', 'as', 'os', 'e', 'em', 'no', 'na', 'nos', 'nas', 'com', 'que', 'um', 'uma', 'pra', 'para', 'ao', 'aos', 'sem', 'sobre', 'muito', 'muita', 'muitos', 'muitas', 'mais', 'menos'])
+  const _tok = (s) => _normText(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !_STOP.has(w))
+  const _overlap = (a, b) => {
+    const A = new Set(_tok(a)); const B = new Set(_tok(b))
+    if (!A.size || !B.size) return 0
+    let inter = 0
+    for (const w of A) if (B.has(w)) inter++
+    return inter / Math.min(A.size, B.size)
+  }
+  // Categorias que podem ter VÁRIAS instâncias distintas (erros/contradições
+  // diferentes). As demais são dimensões únicas: no máximo 1 ponto por categoria.
+  const _MULTI = new Set(['informacao_errada', 'contradicao', 'outro'])
+  const _dedupe = (list) => {
+    const out = []
+    for (const item of list) {
+      const cat = String(item.categoria || '').toLowerCase()
+      const idx = out.findIndex((o) => {
+        const oc = String(o.categoria || '').toLowerCase()
+        if (cat && oc === cat && !_MULTI.has(cat)) return true
+        return _overlap(o.titulo, item.titulo) >= 0.5
+      })
+      if (idx >= 0) {
+        if ((_SEV[item.severidade] || 0) > (_SEV[out[idx].severidade] || 0)) out[idx] = item
+        continue
+      }
+      out.push(item)
+    }
+    return out
+  }
+  const _isEnvioForaHorario = (n) => {
+    const t = _normText(n.titulo)
+    return /(fora do horario|horario util|fora de horario|madrugada|fim de semana|final de semana|domingo)/.test(t)
+      && /(envi|mandou|mensagem|mensagens)/.test(t)
+  }
+
+  const negativosLimpos = _dedupe(negativos.filter((n) => !_isEnvioForaHorario(n)))
+  const positivosLimpos = _dedupe(positivos)
+
   // nota numérica
   let nota = Number(p.nota_avaliacao)
   if (!Number.isFinite(nota)) nota = null
@@ -1504,10 +1549,10 @@ function normalizeAIResult(parsed, base, env = {}) {
   return {
     avaliacao: p.avaliacao != null ? String(p.avaliacao) : null,
     nota_avaliacao: nota,
-    pontos_positivos: positivos,
-    pontos_negativos: negativos,
-    ponto_positivo: joinTitulos(positivos),
-    ponto_negativo: joinTitulos(negativos),
+    pontos_positivos: positivosLimpos,
+    pontos_negativos: negativosLimpos,
+    ponto_positivo: joinTitulos(positivosLimpos),
+    ponto_negativo: joinTitulos(negativosLimpos),
   }
 }
 

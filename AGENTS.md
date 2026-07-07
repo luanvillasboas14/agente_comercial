@@ -137,6 +137,15 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
   - Grifo de ponto negativo: a `citacao` de um ponto negativo só é mantida se corresponder a uma fala do ATENDENTE (sender_type 'user', excluindo contexto). Citação que bate só com mensagem do cliente — ou não bate com nenhuma fala do consultor — é zerada em normalizeAIResult. Evita grifar mensagem do cliente.
   - Insistência na venda (refinamento do agradecimento): agradecimento/encerramento do consultor NÃO é sempre negativo. Se o cliente recusou UMA vez e o consultor só agradeceu e mandou pra Perdido SEM insistir = negativo "Atendente não insistiu na venda" (categoria `insistencia`), com o agradecimento grifado. Se o consultor tentou reverter/insistir antes de encerrar = positivo, sem grifo. Prompt (critério 15 + instrução de citação) atualizado; a trava server-side mantém o agradecimento do consultor como citação válida (é fala 'user').
 
+### 2026-07-07 — Deduplicação de pontos + envio fora do horário não é negativo
+
+- Data: 2026-07-07
+- Modelo usado: Opus 4.8 (principal)
+- Decisão:
+  - `normalizeAIResult` passou a deduplicar `pontos_positivos`/`pontos_negativos`: categorias que são dimensões únicas (todas menos `informacao_errada`, `contradicao`, `outro`) ficam com no máximo 1 ponto (mantém a maior severidade); demais dedupe por sobreposição de tokens do título (>= 0,5). Evita "avaliar a mesma coisa duas vezes" (ex.: dois pontos de áudio confuso ou de demora).
+  - O consultor ENVIAR mensagens fora do horário útil deixou de ser ponto negativo: filtro server-side remove pontos negativos com esse padrão e o prompt foi instruído a não gerá-los. Só a DEMORA de resposta em horário útil é penalizada.
+  - Prompt também instruído a não repetir o mesmo problema em pontos distintos.
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).
