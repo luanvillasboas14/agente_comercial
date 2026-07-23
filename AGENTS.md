@@ -146,6 +146,19 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
   - O consultor ENVIAR mensagens fora do horário útil deixou de ser ponto negativo: filtro server-side remove pontos negativos com esse padrão e o prompt foi instruído a não gerá-los. Só a DEMORA de resposta em horário útil é penalizada.
   - Prompt também instruído a não repetir o mesmo problema em pontos distintos.
 
+### 2026-07-23 — IA comercial confundia duração (meses) com número de parcelas
+
+- Data: 2026-07-23
+- Modelo usado: Opus 4.8 (principal)
+- Causa (auditada em `mensagens_ia`, execução EX-260723-1740-855): a tool `buscar_precos` lê `documents_precos`, cujo metadata só tem `tipo/curso/valor/tempo/modalidade` — SEM número de parcelas. A IA recebeu só "duracao: 6 meses | valor: 198,00"; quando o cliente chutou "São 6x?", ela concordou, tratando os 6 meses de duração como 6 parcelas.
+- Regra de negócio (confirmada pelo usuário): pós — 6 meses = 12 parcelas; 9 meses = 15 parcelas; o valor é o de CADA parcela; vale só pra pós.
+- Decisão (2 camadas):
+  - Dados: `server/ai/toolExecutorsServer.js` passou a derivar o nº de parcelas da duração (`parcelasPosFromTempo`, mapa {6:12, 9:15}) e injeta `parcelas: Nx de R$ ...` na FICHA DO PRECO, só pra pós. Duração fora do mapa => não informa parcelas (não inventa).
+  - Prompt: regra "PARCELAS ≠ DURAÇÃO" adicionada na regra 14 (PREÇOS). Aplicada no fallback (`promptsLoader.js`) e publicada como nova versão ativa `ia_prompt_versions` v23 (v22 desativada) via `createVersionAndActivate` manual.
+- Alternativas descartadas:
+  - Só prompt (sem enriquecer a FICHA) — descartada: mantinha a raiz (falta do dado); a IA poderia continuar chutando.
+  - Hardcodar "sempre 12 parcelas" — descartada: 9 meses = 15 parcelas, então o número depende da duração.
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).

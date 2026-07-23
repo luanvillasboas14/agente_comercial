@@ -211,6 +211,17 @@ function isPosTipo(tipo) {
   return /(p[óo]s|mba|especializa)/i.test(t)
 }
 
+// Regra de parcelamento da PÓS-GRADUAÇÃO: a DURAÇÃO em meses NÃO é o número
+// de parcelas. Conforme a base: 6 meses => 12 parcelas; 9 meses => 15 parcelas.
+// O valor mostrado é o valor de CADA parcela. Duração desconhecida => null
+// (não informamos um número inventado).
+const POS_PARCELAS_POR_MESES = { 6: 12, 9: 15 }
+function parcelasPosFromTempo(tempo) {
+  const meses = parseInt(String(tempo ?? '').replace(/\D+/g, ''), 10)
+  if (!Number.isFinite(meses)) return null
+  return POS_PARCELAS_POR_MESES[meses] || null
+}
+
 /**
  * Fallback: serializa o metadata em string compacta (até ~250 chars) pra
  * a IA ter pelo menos UMA visão dos campos brutos quando o extrator
@@ -368,6 +379,16 @@ async function vectorSearch(env, ctx, toolName, rpcName, query, matchCount = 10,
           if (meta.modalidade) fields.push(`modalidade: ${meta.modalidade}`)
           if (meta.tempo) fields.push(`duracao: ${meta.tempo}`)
           if (meta.valor) fields.push(`valor: ${meta.valor}`)
+          // Parcelas da pós: derivadas da duração (6 meses=12x, 9 meses=15x).
+          // A duração em meses NÃO é o número de parcelas — deixamos explícito
+          // pra a IA não confundir (bug real: respondeu "6 parcelas" por ver
+          // "duracao: 6 meses"). Valor acima é o de CADA parcela.
+          if (isPosTipo(meta.tipo)) {
+            const parcelas = parcelasPosFromTempo(meta.tempo)
+            if (parcelas) {
+              fields.push(`parcelas: ${parcelas}x de R$ ${meta.valor || '—'} (a duracao NAO e o numero de parcelas)`)
+            }
+          }
           lines.push(`[FICHA DO PRECO — ${fields.join(' | ')}]`)
         }
         // SEMPRE anexa o metadata bruto resumido — mesmo quando a FICHA
