@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const DEFAULT_MAX_PAGES = 500 // até 125k eventos (configurável via env)
 const PAGE_LIMIT = 250
-const DEFAULT_PAGE_SLEEP_MS = 1000
+const DEFAULT_PAGE_SLEEP_MS = 3000 // ~20 req/min (mais suave com o Kommo)
 const CHUNK_SIZE = 100
 
 export async function runAceiteSyncJob(env, { trigger = 'manual' } = {}) {

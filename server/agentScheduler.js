@@ -73,8 +73,17 @@ function isIaFeedbackEnabled(env) {
 const DEFAULT_INTERVAL_SEC = 10
 const DEFAULT_DEBOUNCE_SEC = 5
 
+// Janela noturna (horário de Brasília): das 22h às 6h o scheduler roda mais
+// devagar pra aliviar as requisições ao Kommo (evita bloqueio por excesso).
+// O timer de base continua igual; a gente só "pula" ticks pra espaçar as
+// rodadas durante a janela. Tudo configurável por env.
+const DEFAULT_NIGHT_START_HOUR_BRT = 22
+const DEFAULT_NIGHT_END_HOUR_BRT = 6
+const DEFAULT_NIGHT_INTERVAL_SEC = 30
+
 let intervalHandle = null
 let running = false
+let lastRunMs = 0
 
 /** Evita flood: aviso de funil vazio no máx. 1x / 90s. */
 let lastEmptyFunnelWarnMs = 0
@@ -93,6 +102,51 @@ function getDebounceMs(env) {
   const v = Number(env.KOMMO_SCHEDULER_DEBOUNCE_SEC)
   const sec = Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_DEBOUNCE_SEC
   return sec * 1000
+}
+
+/** Config da janela noturna (horário de Brasília). */
+function getNightThrottle(env) {
+  const hour = (k, def) => {
+    const v = Number(env[k])
+    return Number.isFinite(v) && v >= 0 && v <= 23 ? Math.floor(v) : def
+  }
+  const iv = Number(env.KOMMO_SCHEDULER_NIGHT_INTERVAL_SEC)
+  const intervalSec = Number.isFinite(iv) && iv > 0 ? Math.floor(iv) : DEFAULT_NIGHT_INTERVAL_SEC
+  return {
+    enabled: String(env.KOMMO_SCHEDULER_NIGHT_THROTTLE_ENABLED ?? 'true').trim().toLowerCase() !== 'false',
+    startHour: hour('KOMMO_SCHEDULER_NIGHT_START_HOUR_BRT', DEFAULT_NIGHT_START_HOUR_BRT),
+    endHour: hour('KOMMO_SCHEDULER_NIGHT_END_HOUR_BRT', DEFAULT_NIGHT_END_HOUR_BRT),
+    intervalMs: intervalSec * 1000,
+  }
+}
+
+/** Hora atual (0-23) no fuso America/Sao_Paulo, com fallback pra hora local. */
+function saoPauloHourNow() {
+  try {
+    const s = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      hour12: false,
+    }).format(new Date())
+    let h = parseInt(s, 10)
+    if (h === 24) h = 0
+    return Number.isFinite(h) ? h : new Date().getHours()
+  } catch {
+    return new Date().getHours()
+  }
+}
+
+/** Janela pode cruzar a meia-noite (ex.: 22h → 6h). */
+function inNightWindow(hour, start, end) {
+  if (start === end) return false
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end
+}
+
+/** Retorna { throttle, intervalMs } indicando se estamos na janela noturna. */
+function isNightThrottled(env) {
+  const cfg = getNightThrottle(env)
+  if (!cfg.enabled) return { throttle: false, intervalMs: 0 }
+  return { throttle: inNightWindow(saoPauloHourNow(), cfg.startHour, cfg.endHour), intervalMs: cfg.intervalMs }
 }
 
 function isEnabled(env) {
@@ -308,7 +362,11 @@ export function startAgentScheduler(env) {
   const intervalMs = getIntervalMs(env)
   const tick = () => {
     if (running) return // skip se o tick anterior ainda tá rodando
+    // Na janela noturna, espaça as rodadas (ex.: 30s) pra aliviar o Kommo.
+    const night = isNightThrottled(env)
+    if (night.throttle && Date.now() - lastRunMs < night.intervalMs) return
     running = true
+    lastRunMs = Date.now()
     runSchedulerTick(env)
       .then((stats) => {
         if (stats.processed > 0 || stats.errors > 0) {
@@ -324,7 +382,11 @@ export function startAgentScheduler(env) {
   intervalHandle = setInterval(tick, intervalMs)
   // Roda um tick depois de 5s pra não competir com o boot.
   setTimeout(tick, 5000)
-  console.log(`[scheduler] iniciado (intervalo=${Math.round(intervalMs / 1000)}s, debounce=${Math.round(getDebounceMs(env) / 1000)}s)`)
+  const nightCfg = getNightThrottle(env)
+  const nightLog = nightCfg.enabled
+    ? `, noturno ${nightCfg.startHour}h-${nightCfg.endHour}h BRT=${Math.round(nightCfg.intervalMs / 1000)}s`
+    : ''
+  console.log(`[scheduler] iniciado (intervalo=${Math.round(intervalMs / 1000)}s, debounce=${Math.round(getDebounceMs(env) / 1000)}s${nightLog})`)
   return { started: true, intervalMs }
 }
 

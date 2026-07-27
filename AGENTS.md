@@ -159,6 +159,17 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
   - Só prompt (sem enriquecer a FICHA) — descartada: mantinha a raiz (falta do dado); a IA poderia continuar chutando.
   - Hardcodar "sempre 12 parcelas" — descartada: 9 meses = 15 parcelas, então o número depende da duração.
 
+### 2026-07-27 — Janela noturna do Agent Scheduler pra aliviar o Kommo
+
+- Data: 2026-07-27
+- Modelo usado: Opus 4.8 (principal)
+- Causa: Kommo bloqueava por excesso de requisições ~22h-01h. O `agentScheduler` roda 24/7 a cada 10s (carga constante); os jobs paginados (Kommo Events ~24 req/min de pico, Aceite Sync ~60 req/min) ficam bem abaixo do limite do Kommo, então o suspeito é a carga contínua + cota diária.
+- Decisão: throttle por horário no `server/agentScheduler.js`. Das 22h às 6h (BRT, fuso `America/Sao_Paulo`) o scheduler espaça as rodadas pra 30s em vez de 10s. O timer base continua igual; o `tick` só "pula" quando está na janela e faz <30s desde a última rodada (`lastRunMs`). Fora da janela, comportamento inalterado.
+- Configurável por env (defaults = pedido do usuário): `KOMMO_SCHEDULER_NIGHT_THROTTLE_ENABLED` (true), `KOMMO_SCHEDULER_NIGHT_START_HOUR_BRT` (22), `KOMMO_SCHEDULER_NIGHT_END_HOUR_BRT` (6), `KOMMO_SCHEDULER_NIGHT_INTERVAL_SEC` (30).
+- Alternativas descartadas:
+  - Trocar `setInterval` por `setTimeout` auto-reagendado — descartada: mais invasivo, mexeria na estrutura estável do loop; o skip-guard entrega o mesmo espaçamento efetivo com risco menor.
+  - Mexer nos horários de cron do Kommo Events / Aceite Sync — descartada: eles já rodam abaixo do limite e fora da janela crítica; não são a causa principal.
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).
