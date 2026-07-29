@@ -3,3 +3,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Dumps de workflows do n8n (podem conter tokens do Kommo em nos HTTP) e scripts de analise
+workflows.json
+workflows_page*.json
+_wf_*.cjs
+revisão.docx

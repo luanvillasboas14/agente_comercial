@@ -170,6 +170,16 @@ Ambas convivem: guard cobre o pior caso agora, sistema de negativos faz o prompt
   - Trocar `setInterval` por `setTimeout` auto-reagendado — descartada: mais invasivo, mexeria na estrutura estável do loop; o skip-guard entrega o mesmo espaçamento efetivo com risco menor.
   - Mexer nos horários de cron do Kommo Events / Aceite Sync — descartada: eles já rodam abaixo do limite e fora da janela crítica; não são a causa principal.
 
+### 2026-07-29 — IA comercial recomendava cursos que não existem no catálogo
+
+- Data: 2026-07-29
+- Modelo usado: Opus 4.8 (principal)
+- Causa: lead perguntou por "necropsia e anatopraxia"; a IA não achou na base e, pelo conhecimento geral, sugeriu "Medicina Veterinária ou áreas da saúde que oferecemos" — curso que NÃO é ofertado. O prompt tinha travas fortes pra preço e grade, mas nenhuma regra proibindo sugerir cursos não confirmados na base (RAG).
+- Decisão: nova regra 20 no prompt do agente (`FALLBACK_AGENT_RULES_TEXT` em `promptsLoader.js`): só pode nomear/recomendar/sugerir um curso se o nome dele apareceu LITERALMENTE no resultado de uma tool (buscar_informacoes/buscar_pos/buscar_precos/buscar_perguntas) nesta conversa. Conhecimento geral não é catálogo. Proibido chutar "cursos relacionados". Se não achar, pergunta a área/curso de interesse ou chama distribuir_humano — nunca afirma que temos algo sem confirmar.
+- Deploy: em produção o agente usa a versão ativa de `ia_prompt_versions` (fallback do código só se o banco falhar). Então, além de editar o fallback, é preciso publicar: redeploy + botão "Sincronizar do código" no Prompt Optimizer (endpoint `POST /api/ia-feedback/prompt-versions/sync-from-fallback`), que cria e ativa a nova versão a partir do fallback.
+- Alternativas descartadas:
+  - Hard guard por regex — descartada: exigiria a lista completa e sempre atualizada do catálogo pra saber o que é "curso inexistente"; inviável de manter. O grounding via tool + regra de prompt ataca a raiz (não inventar).
+
 ## Convenções
 
 - Erros em código de servidor: prefixo `[modulo/categoria]` (ex.: `[analyzer/parser]`, `[promptVersionStore/supabase]`).
